@@ -1,4 +1,4 @@
-## Denoising Diffusion Probabilistic Model, in Pytorch
+## Denoising Diffusion Probabilistic Model, in Pytorch (wip)
 
 Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch
 
