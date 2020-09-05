@@ -6,6 +6,14 @@ import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
 
+# helpers functions
+
+def exists(x):
+    return x is not None
+
+def default(val, d):
+    return d if not exists(val) else val
+
 # small helper modules
 
 class Residual(nn.Module):
@@ -59,27 +67,28 @@ class Rezero(nn.Module):
 
 # building block modules
 
+class Block(nn.Module):
+    def __init__(self, dim, dim_out, groups = 32):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(dim, dim_out, 3, padding=1),
+            nn.GroupNorm(groups, dim_out),
+            Mish()
+        )
+    def forward(self, x):
+        return self.block(x)
+
 class ResnetBlock(nn.Module):
-    def __init__(self, dim, out_dim, *, time_emb_dim, groups = 32):
+    def __init__(self, dim, dim_out, *, time_emb_dim, groups = 32):
         super().__init__()
         self.mlp = nn.Sequential(
             Mish(),
-            nn.Linear(time_emb_dim, out_dim)
+            nn.Linear(time_emb_dim, dim_out)
         )
 
-        self.block1 = nn.Sequential(
-            nn.Conv2d(dim, out_dim, 3, padding=1),
-            nn.GroupNorm(groups, out_dim),
-            Mish()
-        )
-
-        self.block2 = nn.Sequential(
-            nn.Conv2d(out_dim, out_dim, 3, padding=1),
-            nn.GroupNorm(groups, out_dim),
-            Mish()
-        )
-
-        self.res_conv = nn.Conv2d(dim, out_dim, 1) if dim != out_dim else nn.Identity()
+        self.block1 = Block(dim, dim_out)
+        self.block2 = Block(dim_out, dim_out)
+        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb):
         h = self.block1(x)
@@ -109,7 +118,7 @@ class LinearAttention(nn.Module):
 # model
 
 class Unet(nn.Module):
-    def __init__(self, dim, dim_mults=(1, 2, 4, 8), groups = 32):
+    def __init__(self, dim, out_dim = None, dim_mults=(1, 2, 4, 8), groups = 32):
         super().__init__()
         dims = [3, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -148,11 +157,10 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
+        out_dim = default(out_dim, 3)
         self.final_conv = nn.Sequential(
-            nn.Conv2d(dim, dim, 3, padding = 1),
-            nn.GroupNorm(groups, dim),
-            Mish(),
-            nn.Conv2d(dim, 3, 1)
+            Block(dim, dim),
+            nn.Conv2d(dim, out_dim, 1)
         )
 
     def forward(self, x, time):
