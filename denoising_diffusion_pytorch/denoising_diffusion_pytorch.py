@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 from einops import rearrange
 
-# helper models
+# small helper modules
 
 class Residual(nn.Module):
     def __init__(self, fn):
@@ -28,34 +28,6 @@ class SinusoidalPosEmb(nn.Module):
         emb = x[:, None] * emb[None, :]
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
-
-class ResnetBlock(nn.Module):
-    def __init__(self, dim, out_dim, *, time_emb_dim, groups = 32):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            Mish(),
-            nn.Linear(time_emb_dim, out_dim)
-        )
-
-        self.block1 = nn.Sequential(
-            nn.Conv2d(dim, out_dim, 3, padding=1),
-            nn.GroupNorm(groups, out_dim),
-            Mish()
-        )
-
-        self.block2 = nn.Sequential(
-            nn.Conv2d(out_dim, out_dim, 3, padding=1),
-            nn.GroupNorm(groups, out_dim),
-            Mish()
-        )
-
-        self.res_conv = nn.Conv2d(dim, out_dim, 1) if dim != out_dim else nn.Identity()
-
-    def forward(self, x, time_emb):
-        h = self.block1(x)
-        h += self.mlp(time_emb)[:, :, None, None]
-        h = self.block2(h)
-        return h + self.res_conv(x)
 
 class Mish(nn.Module):
     def forward(self, x):
@@ -84,6 +56,36 @@ class Rezero(nn.Module):
 
     def forward(self, x):
         return x * self.g
+
+# building block modules
+
+class ResnetBlock(nn.Module):
+    def __init__(self, dim, out_dim, *, time_emb_dim, groups = 32):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            Mish(),
+            nn.Linear(time_emb_dim, out_dim)
+        )
+
+        self.block1 = nn.Sequential(
+            nn.Conv2d(dim, out_dim, 3, padding=1),
+            nn.GroupNorm(groups, out_dim),
+            Mish()
+        )
+
+        self.block2 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 3, padding=1),
+            nn.GroupNorm(groups, out_dim),
+            Mish()
+        )
+
+        self.res_conv = nn.Conv2d(dim, out_dim, 1) if dim != out_dim else nn.Identity()
+
+    def forward(self, x, time_emb):
+        h = self.block1(x)
+        h += self.mlp(time_emb)[:, :, None, None]
+        h = self.block2(h)
+        return h + self.res_conv(x)
 
 class LinearAttention(nn.Module):
     def __init__(self, dim, heads = 8, dim_head = 32):
