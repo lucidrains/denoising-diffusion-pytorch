@@ -14,8 +14,9 @@ setup(
     'generative models'
   ],
   install_requires=[
-    'torch',
-    'einops'
+    'einops',
+    'numpy',
+    'torch'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',
