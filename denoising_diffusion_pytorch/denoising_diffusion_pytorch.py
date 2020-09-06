@@ -1,13 +1,24 @@
 import math
 import torch
-from inspect import isfunction
-from functools import partial
 from torch import nn, einsum
 import torch.nn.functional as F
+from inspect import isfunction
+from functools import partial
+
+from torch.utils import data
+from pathlib import Path
+from torch.optim import Adam
+from torchvision import transforms, utils
+from PIL import Image
 
 import numpy as np
 from tqdm import tqdm
 from einops import rearrange
+
+# constants
+
+SAVE_AND_SAMPLE_EVERY = 1000
+EXTS = ['jpg', 'png']
 
 # helpers functions
 
@@ -19,8 +30,10 @@ def default(val, d):
         return val
     return d() if isfunction(d) else d
 
-def normal_kl(mean1, logvar1, mean2, logvar2):
-    return 0.5 * (-1. + logvar2 - logvar1 + torch.exp(logvar1 - logvar2) + torch.exp(-logvar2) * (mean1 - mean2) ** 2)
+def cycle(dl):
+    while True:
+        for data in dl:
+            yield data
 
 # small helper modules
 
@@ -324,3 +337,74 @@ class GaussianDiffusion(nn.Module):
         b, *_, device = *x.shape, x.device
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         return self.p_losses(x, t, *args, **kwargs)
+
+# dataset classes
+
+class Dataset(data.Dataset):
+    def __init__(self, folder, image_size):
+        super().__init__()
+        self.folder = folder
+        self.image_size = image_size
+        self.paths = [p for ext in EXTS for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+
+        self.transform = transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor()
+        ])
+
+    def __len__(self):
+        return len(self.paths)
+
+    def __getitem__(self, index):
+        path = self.paths[index]
+        img = Image.open(path)
+        return self.transform(img)
+
+# trainer class
+
+class Trainer(object):
+    def __init__(
+        self,
+        diffusion_model,
+        folder,
+        *,
+        image_size = 128,
+        train_batch_size = 32,
+        train_lr = 3e-4,
+        train_num_steps = 100000,
+        gradient_accumulate_every = 1
+    ):
+        super().__init__()
+        self.model = diffusion_model
+        self.image_size = image_size
+        self.gradient_accumulate_every = gradient_accumulate_every
+        self.train_num_steps = train_num_steps
+
+        self.ds = Dataset(folder, image_size)
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
+        self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
+
+    def train(self):
+        ind = 0
+
+        while ind < self.train_num_steps:
+            for i in range(self.gradient_accumulate_every):
+                data = next(self.dl).cuda()
+                loss = self.model(data)
+                print(f'{ind}: {loss.item()}')
+                loss.backward()
+
+            self.opt.step()
+            self.opt.zero_grad()
+
+            if ind % SAVE_AND_SAMPLE_EVERY == 0:
+                milestone = ind // SAVE_AND_SAMPLE_EVERY
+                all_images = self.model.p_sample_loop((64, 3, self.image_size, self.image_size))
+                utils.save_image(all_images, f'./sample-{milestone}.png', nrow=8)
+                torch.save(model.state_dict(), f'./model-{milestone}.pt')
+
+            ind += 1
+
+        print('training completed')
