@@ -24,7 +24,7 @@ diffusion = GaussianDiffusion(
     beta_start = 0.0001,
     beta_end = 0.02,
     num_diffusion_timesteps = 1000,   # number of steps
-    loss_type = 'l1'                  # L1 or L2
+    loss_type = 'l1'                  # L1 or L2 (wavegrad paper claims l1 is better?)
 )
 
 training_images = torch.randn(8, 3, 128, 128)
@@ -46,5 +46,16 @@ sampled_images.shape # (1, 3, 128, 128)
     eprint={2006.11239},
     archivePrefix={arXiv},
     primaryClass={cs.LG}
+}
+```
+
+```bibtex
+@misc{chen2020wavegrad,
+    title={WaveGrad: Estimating Gradients for Waveform Generation},
+    author={Nanxin Chen and Yu Zhang and Heiga Zen and Ron J. Weiss and Mohammad Norouzi and William Chan},
+    year={2020},
+    eprint={2009.00713},
+    archivePrefix={arXiv},
+    primaryClass={eess.AS}
 }
 ```
