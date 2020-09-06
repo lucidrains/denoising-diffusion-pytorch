@@ -1,6 +1,8 @@
+<img src="./denoising-diffusion.png" width="500px"></img>
+
 ## Denoising Diffusion Probabilistic Model, in Pytorch (wip)
 
-Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch.
+Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch. It is a new approach to generative modeling that may <a href="https://ajolicoeur.wordpress.com/the-new-contender-to-gans-score-matching-with-langevin-sampling/">have the potential</a> to rival GANs. It uses denoising score matching to estimate the gradient of the data distribution, followed by Langevin sampling to sample from the true distribution. This implementation was transcribed from the official Tensorflow version <a href="https://github.com/hojonathanho/diffusion">here</a>. 
 
 ## Install
 
@@ -46,16 +48,5 @@ sampled_images.shape # (1, 3, 128, 128)
     eprint={2006.11239},
     archivePrefix={arXiv},
     primaryClass={cs.LG}
-}
-```
-
-```bibtex
-@misc{chen2020wavegrad,
-    title={WaveGrad: Estimating Gradients for Waveform Generation},
-    author={Nanxin Chen and Yu Zhang and Heiga Zen and Ron J. Weiss and Mohammad Norouzi and William Chan},
-    year={2020},
-    eprint={2009.00713},
-    archivePrefix={arXiv},
-    primaryClass={eess.AS}
 }
 ```
