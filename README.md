@@ -1,6 +1,6 @@
 <img src="./denoising-diffusion.png" width="500px"></img>
 
-## Denoising Diffusion Probabilistic Model, in Pytorch (wip)
+## Denoising Diffusion Probabilistic Model, in Pytorch
 
 Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch. It is a new approach to generative modeling that may <a href="https://ajolicoeur.wordpress.com/the-new-contender-to-gans-score-matching-with-langevin-sampling/">have the potential</a> to rival GANs. It uses denoising score matching to estimate the gradient of the data distribution, followed by Langevin sampling to sample from the true distribution. This implementation was transcribed from the official Tensorflow version <a href="https://github.com/hojonathanho/diffusion">here</a>. 
 
