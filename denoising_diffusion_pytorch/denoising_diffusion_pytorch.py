@@ -322,5 +322,5 @@ class GaussianDiffusion(nn.Module):
 
     def forward(self, x, *args, **kwargs):
         b, *_, device = *x.shape, x.device
-        t = torch.randint(0, 1000, (b,), device=device).long()
+        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         return self.p_losses(x, t, *args, **kwargs)
