@@ -16,7 +16,8 @@ setup(
   install_requires=[
     'einops',
     'numpy',
-    'torch'
+    'torch',
+    'tqdm'
   ],
   classifiers=[
     'Development Status :: 4 - Beta',

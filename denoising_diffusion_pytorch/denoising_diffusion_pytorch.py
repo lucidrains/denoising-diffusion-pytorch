@@ -6,6 +6,7 @@ from torch import nn, einsum
 import torch.nn.functional as F
 
 import numpy as np
+from tqdm import tqdm
 from einops import rearrange
 
 # helpers functions
@@ -291,7 +292,7 @@ class GaussianDiffusion(nn.Module):
         b = shape[0]
         img = torch.randn(shape, device=device)
 
-        for i in reversed(range(0, self.num_timesteps)):
+        for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
         return img
 
@@ -303,7 +304,7 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, denoise_fn, noise = None):
+    def p_losses(self, x_start, t, noise = None):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
 
@@ -319,12 +320,7 @@ class GaussianDiffusion(nn.Module):
 
         return loss
 
-    def forward(self, *args, **kwargs):
-        return self.p_losses(*args, **kwargs)
-
-class Trainer(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x
+    def forward(self, x, *args, **kwargs):
+        b, *_, device = *x.shape, x.device
+        t = torch.randint(0, 1000, (b,), device=device).long()
+        return self.p_losses(x, t, *args, **kwargs)
