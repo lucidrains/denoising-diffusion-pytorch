@@ -34,8 +34,8 @@ loss = diffusion(training_images)
 loss.backward()
 # after a lot of training
 
-sampled_images = diffusion.p_sample_loop((1, 3, 128, 128))
-sampled_images.shape # (1, 3, 128, 128)
+sampled_images = diffusion.sample(128, batch_size = 4)
+sampled_images.shape # (4, 3, 128, 128)
 ```
 
 Or, if you simply want to pass in a folder name and the desired image dimensions, you can use the `Trainer` class to easily train a model.

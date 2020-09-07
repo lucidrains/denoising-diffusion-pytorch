@@ -309,6 +309,10 @@ class GaussianDiffusion(nn.Module):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
         return img
 
+    @torch.no_grad()
+    def sample(self, image_size, batch_size = 16):
+        return self.p_sample_loop((16, 3, image_size, image_size))
+
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
