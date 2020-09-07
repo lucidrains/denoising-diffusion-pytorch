@@ -61,9 +61,9 @@ trainer = Trainer(
     'path/to/your/images',
     image_size = 128,
     train_batch_size = 32,
-    train_lr = 3e-4,
+    train_lr = 2e-5,
     train_num_steps = 100000,
-    gradient_accumulate_every = 1
+    gradient_accumulate_every = 2
 )
 
 trainer.train()
