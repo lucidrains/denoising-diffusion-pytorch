@@ -403,7 +403,7 @@ class Trainer(object):
                 milestone = ind // SAVE_AND_SAMPLE_EVERY
                 all_images = self.model.p_sample_loop((64, 3, self.image_size, self.image_size))
                 utils.save_image(all_images, f'./sample-{milestone}.png', nrow=8)
-                torch.save(model.state_dict(), f'./model-{milestone}.pt')
+                torch.save(self.model.state_dict(), f'./model-{milestone}.pt')
 
             ind += 1
 
