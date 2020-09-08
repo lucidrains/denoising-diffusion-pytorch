@@ -414,7 +414,7 @@ class Trainer(object):
                 data = next(self.dl).cuda()
                 loss = self.model(data)
                 print(f'{ind}: {loss.item()}')
-                loss.backward()
+                (loss / self.gradient_accumulate_every).backward()
 
             self.opt.step()
             self.opt.zero_grad()
