@@ -444,9 +444,10 @@ class Trainer(object):
 
     def load(self, milestone):
         data = torch.load(f'./model-{milestone}.pt')
+
         self.step = data['step']
-        self.model = data['model']
-        self.ema_model = data['ema']
+        self.model.load_state_dict(data['model'])
+        self.ema_model.load_state_dict(data['ema'])
 
     def train(self):
         while self.step < self.train_num_steps:
