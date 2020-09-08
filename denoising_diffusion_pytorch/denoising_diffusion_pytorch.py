@@ -19,7 +19,7 @@ from einops import rearrange
 # constants
 
 SAVE_AND_SAMPLE_EVERY = 1000
-UPDATE_EMA_EVERY = 100
+UPDATE_EMA_EVERY = 10
 EXTS = ['jpg', 'png']
 
 # helpers functions
