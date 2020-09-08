@@ -313,6 +313,22 @@ class GaussianDiffusion(nn.Module):
     def sample(self, image_size, batch_size = 16):
         return self.p_sample_loop((16, 3, image_size, image_size))
 
+    @torch.no_grad()
+    def interpolate(self, x1, x2, t = None, lam = 0.5):
+        b, *_, device = *x1.shape, x1.device
+        t = default(t, self.num_timesteps - 1)
+
+        assert x1.shape == x2.shape
+
+        t_batched = torch.stack([torch.tensor(t, device=device)] * b)
+        xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batched), (x1, x2))
+
+        img = (1 - lam) * xt1 + lam * xt2
+        for i in tqdm(reversed(range(0, t)), desc='interpolation sample time step', total=t):
+            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
+
+        return img
+
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
