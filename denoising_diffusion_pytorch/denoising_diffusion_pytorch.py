@@ -1,4 +1,5 @@
 import math
+import copy
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
@@ -18,6 +19,7 @@ from einops import rearrange
 # constants
 
 SAVE_AND_SAMPLE_EVERY = 1000
+UPDATE_EMA_EVERY = 100
 EXTS = ['jpg', 'png']
 
 # helpers functions
@@ -36,6 +38,21 @@ def cycle(dl):
             yield data
 
 # small helper modules
+
+class EMA():
+    def __init__(self, beta):
+        super().__init__()
+        self.beta = beta
+
+    def update_model_average(self, ma_model, current_model):
+        for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
+            old_weight, up_weight = ma_params.data, current_params.data
+            ma_params.data = self.update_average(old_weight, up_weight)
+
+    def update_average(self, old, new):
+        if old is None:
+            return new
+        return old * self.beta + (1 - self.beta) * new
 
 class Residual(nn.Module):
     def __init__(self, fn):
@@ -222,11 +239,15 @@ def noise_like(shape, device, repeat=False):
     return repeat_noise() if repeat else noise()
 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, denoise_fn, beta_start=0.0001, beta_end=0.02, num_diffusion_timesteps=1000, loss_type='l1'):
+    def __init__(self, denoise_fn, beta_start=0.0001, beta_end=0.02, num_diffusion_timesteps=1000, loss_type='l1', betas = None):
         super().__init__()
         self.denoise_fn = denoise_fn
 
-        self.np_betas = betas = np.linspace(beta_start, beta_end, num_diffusion_timesteps).astype(np.float64)
+        if exists(betas):
+            self.np_betas = betas.detach().cpu().numpy() if isinstance(betas, torch.Tensor) else betas
+        else:
+            self.np_betas = betas = np.linspace(beta_start, beta_end, num_diffusion_timesteps).astype(np.float64)
+
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
@@ -390,41 +411,63 @@ class Trainer(object):
         diffusion_model,
         folder,
         *,
+        ema_decay = 0.995,
         image_size = 128,
         train_batch_size = 32,
         train_lr = 2e-5,
         train_num_steps = 100000,
-        gradient_accumulate_every = 2
+        gradient_accumulate_every = 2,
     ):
         super().__init__()
         self.model = diffusion_model
+
         self.image_size = image_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
+
+        self.ema = EMA(ema_decay)
+        self.ema_model = copy.deepcopy(self.model)
 
         self.ds = Dataset(folder, image_size)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
 
-    def train(self):
-        ind = 0
+        self.step = 0
 
-        while ind < self.train_num_steps:
+    def save(self, milestone):
+        data = {
+            'step': self.step,
+            'model': self.model.state_dict(),
+            'ema': self.ema_model.state_dict()
+        }
+        torch.save(data, f'./model-{milestone}.pt')
+
+    def load(self, milestone):
+        data = torch.load(f'./model-{milestone}.pt')
+        self.step = data['step']
+        self.model = data['model']
+        self.ema_model = data['ema']
+
+    def train(self):
+        while self.step < self.train_num_steps:
             for i in range(self.gradient_accumulate_every):
                 data = next(self.dl).cuda()
                 loss = self.model(data)
-                print(f'{ind}: {loss.item()}')
+                print(f'{self.step}: {loss.item()}')
                 (loss / self.gradient_accumulate_every).backward()
 
             self.opt.step()
             self.opt.zero_grad()
 
-            if ind % SAVE_AND_SAMPLE_EVERY == 0:
-                milestone = ind // SAVE_AND_SAMPLE_EVERY
-                all_images = self.model.p_sample_loop((64, 3, self.image_size, self.image_size))
-                utils.save_image(all_images, f'./sample-{milestone}.png', nrow=8)
-                torch.save(self.model.state_dict(), f'./model-{milestone}.pt')
+            if self.step % UPDATE_EMA_EVERY == 0:
+                self.ema.update_model_average(self.ema_model, self.model)
 
-            ind += 1
+            if self.step % SAVE_AND_SAMPLE_EVERY == 0:
+                milestone = self.step // SAVE_AND_SAMPLE_EVERY
+                all_images = self.ema_model.p_sample_loop((64, 3, self.image_size, self.image_size))
+                utils.save_image(all_images, f'./sample-{milestone}.png', nrow=8)
+                self.save(milestone)
+
+            self.step += 1
 
         print('training completed')
