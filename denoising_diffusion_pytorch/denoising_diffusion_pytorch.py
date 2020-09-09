@@ -16,6 +16,12 @@ import numpy as np
 from tqdm import tqdm
 from einops import rearrange
 
+try:
+    from apex import amp
+    APEX_AVAILABLE = True
+except:
+    APEX_AVAILABLE = False
+
 # constants
 
 SAVE_AND_SAMPLE_EVERY = 1000
@@ -36,6 +42,13 @@ def cycle(dl):
     while True:
         for data in dl:
             yield data
+
+def loss_backwards(fp16, loss, optimizer, **kwargs):
+    if fp16:
+        with amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward(**kwargs)
+    else:
+        loss.backward(**kwargs)
 
 # small helper modules
 
@@ -107,7 +120,7 @@ class Rezero(nn.Module):
 # building block modules
 
 class Block(nn.Module):
-    def __init__(self, dim, dim_out, groups = 32):
+    def __init__(self, dim, dim_out, groups = 8):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(dim, dim_out, 3, padding=1),
@@ -118,7 +131,7 @@ class Block(nn.Module):
         return self.block(x)
 
 class ResnetBlock(nn.Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim, groups = 32):
+    def __init__(self, dim, dim_out, *, time_emb_dim, groups = 8):
         super().__init__()
         self.mlp = nn.Sequential(
             Mish(),
@@ -157,7 +170,7 @@ class LinearAttention(nn.Module):
 # model
 
 class Unet(nn.Module):
-    def __init__(self, dim, out_dim = None, dim_mults=(1, 2, 4, 8), groups = 32):
+    def __init__(self, dim, out_dim = None, dim_mults=(1, 2, 4, 8), groups = 8):
         super().__init__()
         dims = [3, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -178,6 +191,7 @@ class Unet(nn.Module):
 
             self.downs.append(nn.ModuleList([
                 ResnetBlock(dim_in, dim_out, time_emb_dim = dim),
+                ResnetBlock(dim_out, dim_out, time_emb_dim = dim),
                 Residual(Rezero(LinearAttention(dim_out))),
                 Downsample(dim_out) if not is_last else nn.Identity()
             ]))
@@ -192,6 +206,7 @@ class Unet(nn.Module):
 
             self.ups.append(nn.ModuleList([
                 ResnetBlock(dim_out * 2, dim_in, time_emb_dim = dim),
+                ResnetBlock(dim_in, dim_in, time_emb_dim = dim),
                 Residual(Rezero(LinearAttention(dim_in))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
@@ -208,8 +223,9 @@ class Unet(nn.Module):
 
         h = []
 
-        for resnet, attn, downsample in self.downs:
+        for resnet, resnet2, attn, downsample in self.downs:
             x = resnet(x, t)
+            x = resnet2(x, t)
             x = attn(x)
             h.append(x)
             x = downsample(x)
@@ -218,9 +234,10 @@ class Unet(nn.Module):
         x = self.mid_attn(x)
         x = self.mid_block2(x, t)
 
-        for resnet, attn, upsample in self.ups:
+        for resnet, resnet2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim=1)
             x = resnet(x, t)
+            x = resnet2(x, t)
             x = attn(x)
             x = upsample(x)
 
@@ -417,22 +434,39 @@ class Trainer(object):
         train_lr = 2e-5,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
+        fp16 = False
     ):
         super().__init__()
         self.model = diffusion_model
+        self.ema = EMA(ema_decay)
+        self.ema_model = copy.deepcopy(self.model)
 
         self.image_size = image_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
-
-        self.ema = EMA(ema_decay)
-        self.ema_model = copy.deepcopy(self.model)
 
         self.ds = Dataset(folder, image_size)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
 
         self.step = 0
+
+        assert not fp16 or fp16 and APEX_AVAILABLE, 'Apex must be installed in order for mixed precision training to be turned on'
+
+        self.fp16 = fp16
+        if fp16:
+            (self.model, self.ema_model), self.opt = amp.initialize([self.model, self.ema_model], self.opt, opt_level='O1')
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.ema_model.load_state_dict(self.model.state_dict())
+
+    def step_ema(self):
+        if self.step < 2000:
+            self.reset_parameters()
+            return
+        self.ema.update_model_average(self.ema_model, self.model)
 
     def save(self, milestone):
         data = {
@@ -450,18 +484,20 @@ class Trainer(object):
         self.ema_model.load_state_dict(data['ema'])
 
     def train(self):
+        backwards = partial(loss_backwards, self.fp16)
+
         while self.step < self.train_num_steps:
             for i in range(self.gradient_accumulate_every):
                 data = next(self.dl).cuda()
                 loss = self.model(data)
                 print(f'{self.step}: {loss.item()}')
-                (loss / self.gradient_accumulate_every).backward()
+                backwards(loss / self.gradient_accumulate_every, self.opt)
 
             self.opt.step()
             self.opt.zero_grad()
 
             if self.step % UPDATE_EMA_EVERY == 0:
-                self.ema.update_model_average(self.ema_model, self.model)
+                self.step_ema()
 
             if self.step % SAVE_AND_SAMPLE_EVERY == 0:
                 milestone = self.step // SAVE_AND_SAMPLE_EVERY
