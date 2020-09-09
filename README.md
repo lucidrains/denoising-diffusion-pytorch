@@ -66,7 +66,8 @@ trainer = Trainer(
     train_lr = 2e-5,
     train_num_steps = 100000,         # total training steps
     gradient_accumulate_every = 2,    # gradient accumulation steps
-    ema_decay = 0.995                 # exponential moving average decay
+    ema_decay = 0.995,                # exponential moving average decay
+    fp16 = True                       # turn on mixed precision training with apex
 )
 
 trainer.train()
