@@ -6,6 +6,8 @@ Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion
 
 <img src="./sample.png" width="500px"><img>
 
+[![PyPI version](https://badge.fury.io/py/denoising-diffusion-pytorch.svg)](https://badge.fury.io/py/denoising-diffusion-pytorch)
+
 ## Install
 
 ```bash
@@ -72,8 +74,6 @@ trainer = Trainer(
 
 trainer.train()
 ```
-
-Todo: Command line tool for one-line training
 
 ## Citations
 
