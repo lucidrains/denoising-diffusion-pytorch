@@ -43,6 +43,14 @@ def cycle(dl):
         for data in dl:
             yield data
 
+def num_to_groups(num, divisor):
+    groups = num // divisor
+    remainder = num % divisor
+    arr = [divisor] * groups
+    if remainder > 0:
+        arr.append(remainder)
+    return arr
+
 def loss_backwards(fp16, loss, optimizer, **kwargs):
     if fp16:
         with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -434,13 +442,16 @@ class Trainer(object):
         train_lr = 2e-5,
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
-        fp16 = False
+        fp16 = False,
+        step_start_ema = 2000
     ):
         super().__init__()
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
+        self.step_start_ema = step_start_ema
 
+        self.batch_size = train_batch_size
         self.image_size = image_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
@@ -463,7 +474,7 @@ class Trainer(object):
         self.ema_model.load_state_dict(self.model.state_dict())
 
     def step_ema(self):
-        if self.step < 2000:
+        if self.step < self.step_start_ema:
             self.reset_parameters()
             return
         self.ema.update_model_average(self.ema_model, self.model)
@@ -501,8 +512,10 @@ class Trainer(object):
 
             if self.step % SAVE_AND_SAMPLE_EVERY == 0:
                 milestone = self.step // SAVE_AND_SAMPLE_EVERY
-                all_images = self.ema_model.p_sample_loop((64, 3, self.image_size, self.image_size))
-                utils.save_image(all_images, f'./sample-{milestone}.png', nrow=8)
+                batches = num_to_groups(36, self.batch_size)
+                all_images_list = list(map(lambda n: self.ema_model.sample(self.image_size, batch_size=n), batches))
+                all_images = torch.cat(all_images_list, dim=0)
+                utils.save_image(all_images, f'./sample-{milestone}.png', nrow=6)
                 self.save(milestone)
 
             self.step += 1
