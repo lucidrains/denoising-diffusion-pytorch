@@ -118,12 +118,13 @@ class Downsample(nn.Module):
         return self.conv(x)
 
 class Rezero(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, fn):
         super().__init__()
+        self.fn = fn
         self.g = nn.Parameter(torch.zeros(1))
 
     def forward(self, x):
-        return x * self.g
+        return self.fn(x) * self.g
 
 # building block modules
 
@@ -157,17 +158,17 @@ class ResnetBlock(nn.Module):
         return h + self.res_conv(x)
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads = 8, dim_head = 32):
+    def __init__(self, dim, heads = 4, dim_head = 32):
         super().__init__()
         self.heads = heads
         hidden_dim = dim_head * heads
-        self.to_qkv = nn.Conv2d(dim, hidden_dim, 1, bias = False)
+        self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
 
     def forward(self, x):
         b, c, h, w = x.shape
         qkv = self.to_qkv(x)
-        q, k, v = rearrange(qkv, 'b (qkv heads c) h w -> qkv b heads c (h w)', heads = self.heads)
+        q, k, v = rearrange(qkv, 'b (qkv heads c) h w -> qkv b heads c (h w)', heads = self.heads, qkv=3)
         q = q.softmax(dim=-2)
         k = k.softmax(dim=-1)
         context = torch.einsum('bhdn,bhen->bhde', k, v)
@@ -510,7 +511,7 @@ class Trainer(object):
             if self.step % UPDATE_EMA_EVERY == 0:
                 self.step_ema()
 
-            if self.step % SAVE_AND_SAMPLE_EVERY == 0:
+            if self.step != 0 and self.step % SAVE_AND_SAMPLE_EVERY == 0:
                 milestone = self.step // SAVE_AND_SAMPLE_EVERY
                 batches = num_to_groups(36, self.batch_size)
                 all_images_list = list(map(lambda n: self.ema_model.sample(self.image_size, batch_size=n), batches))
