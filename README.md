@@ -87,3 +87,15 @@ trainer.train()
     primaryClass={cs.LG}
 }
 ```
+
+```bibtex
+@inproceedings{
+    anonymous2021improved,
+    title={Improved Denoising Diffusion Probabilistic Models},
+    author={Anonymous},
+    booktitle={Submitted to International Conference on Learning Representations},
+    year={2021},
+    url={https://openreview.net/forum?id=-NEXDKk8gZ},
+    note={under review}
+}
+```
