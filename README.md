@@ -71,6 +71,8 @@ trainer = Trainer(
 trainer.train()
 ```
 
+Samples and model checkpoints will be logged to `./results` periodically
+
 ## Citations
 
 ```bibtex
