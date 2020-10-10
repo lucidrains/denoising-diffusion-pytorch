@@ -28,6 +28,9 @@ SAVE_AND_SAMPLE_EVERY = 1000
 UPDATE_EMA_EVERY = 10
 EXTS = ['jpg', 'jpeg', 'png']
 
+RESULTS_FOLDER = Path('./results')
+RESULTS_FOLDER.mkdir(exist_ok = True)
+
 # helpers functions
 
 def exists(x):
@@ -497,10 +500,10 @@ class Trainer(object):
             'model': self.model.state_dict(),
             'ema': self.ema_model.state_dict()
         }
-        torch.save(data, f'./model-{milestone}.pt')
+        torch.save(data, str(RESULTS_FOLDER / f'model-{milestone}.pt'))
 
     def load(self, milestone):
-        data = torch.load(f'./model-{milestone}.pt')
+        data = torch.load(str(RESULTS_FOLDER / f'model-{milestone}.pt'))
 
         self.step = data['step']
         self.model.load_state_dict(data['model'])
@@ -527,7 +530,7 @@ class Trainer(object):
                 batches = num_to_groups(36, self.batch_size)
                 all_images_list = list(map(lambda n: self.ema_model.sample(self.image_size, batch_size=n), batches))
                 all_images = torch.cat(all_images_list, dim=0)
-                utils.save_image(all_images, f'./sample-{milestone}.png', nrow=6)
+                utils.save_image(all_images, str(RESULTS_FOLDER / f'sample-{milestone}.png'), nrow=6)
                 self.save(milestone)
 
             self.step += 1
