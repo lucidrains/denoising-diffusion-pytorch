@@ -27,10 +27,8 @@ model = Unet(
 
 diffusion = GaussianDiffusion(
     model,
-    beta_start = 0.0001,
-    beta_end = 0.02,
-    num_diffusion_timesteps = 1000,   # number of steps
-    loss_type = 'l1'                  # L1 or L2 (wavegrad paper claims l1 is better?)
+    timesteps = 1000,   # number of steps
+    loss_type = 'l1'    # L1 or L2
 )
 
 training_images = torch.randn(8, 3, 128, 128)
@@ -54,10 +52,8 @@ model = Unet(
 
 diffusion = GaussianDiffusion(
     model,
-    beta_start = 0.0001,
-    beta_end = 0.02,
-    num_diffusion_timesteps = 1000,   # number of steps
-    loss_type = 'l1'                  # L1 or L2
+    timesteps = 1000,   # number of steps
+    loss_type = 'l1'    # L1 or L2
 ).cuda()
 
 trainer = Trainer(

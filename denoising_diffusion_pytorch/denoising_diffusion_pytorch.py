@@ -26,7 +26,7 @@ except:
 
 SAVE_AND_SAMPLE_EVERY = 1000
 UPDATE_EMA_EVERY = 10
-EXTS = ['jpg', 'png']
+EXTS = ['jpg', 'jpeg', 'png']
 
 # helpers functions
 
@@ -263,23 +263,35 @@ def noise_like(shape, device, repeat=False):
     noise = lambda: torch.randn(shape, device=device)
     return repeat_noise() if repeat else noise()
 
+def cosine_beta_schedule(timesteps, s = 0.008):
+    """
+    cosine schedule
+    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
+    """
+    steps = timesteps + 1
+    x = np.linspace(0, steps, steps)
+    alphas_cumprod = np.cos(((x / steps) + s) / (1 + s) * np.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return np.clip(betas, a_min = 0, a_max = 0.999)
+
 class GaussianDiffusion(nn.Module):
-    def __init__(self, denoise_fn, beta_start=0.0001, beta_end=0.02, num_diffusion_timesteps=1000, loss_type='l1', betas = None):
+    def __init__(self, denoise_fn, timesteps=1000, loss_type='l1', betas = None):
         super().__init__()
         self.denoise_fn = denoise_fn
 
         if exists(betas):
-            self.np_betas = betas.detach().cpu().numpy() if isinstance(betas, torch.Tensor) else betas
+            betas = betas.detach().cpu().numpy() if isinstance(betas, torch.Tensor) else betas
         else:
-            self.np_betas = betas = np.linspace(beta_start, beta_end, num_diffusion_timesteps).astype(np.float64)
-
-        timesteps, = betas.shape
-        self.num_timesteps = int(timesteps)
-        self.loss_type = loss_type
+            betas = cosine_beta_schedule(timesteps)
 
         alphas = 1. - betas
         alphas_cumprod = np.cumprod(alphas, axis=0)
         alphas_cumprod_prev = np.append(1., alphas_cumprod[:-1])
+
+        timesteps, = betas.shape
+        self.num_timesteps = int(timesteps)
+        self.loss_type = loss_type
 
         to_torch = partial(torch.tensor, dtype=torch.float32)
 
