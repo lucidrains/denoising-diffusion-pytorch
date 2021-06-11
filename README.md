@@ -27,6 +27,7 @@ model = Unet(
 
 diffusion = GaussianDiffusion(
     model,
+    image_size = 128,
     timesteps = 1000,   # number of steps
     loss_type = 'l1'    # L1 or L2
 )
@@ -36,7 +37,7 @@ loss = diffusion(training_images)
 loss.backward()
 # after a lot of training
 
-sampled_images = diffusion.sample(128, batch_size = 4)
+sampled_images = diffusion.sample(batch_size = 4)
 sampled_images.shape # (4, 3, 128, 128)
 ```
 
@@ -52,6 +53,7 @@ model = Unet(
 
 diffusion = GaussianDiffusion(
     model,
+    image_size = 128,
     timesteps = 1000,   # number of steps
     loss_type = 'l1'    # L1 or L2
 ).cuda()
@@ -59,7 +61,6 @@ diffusion = GaussianDiffusion(
 trainer = Trainer(
     diffusion,
     'path/to/your/images',
-    image_size = 128,
     train_batch_size = 32,
     train_lr = 2e-5,
     train_num_steps = 700000,         # total training steps
@@ -77,23 +78,22 @@ Samples and model checkpoints will be logged to `./results` periodically
 
 ```bibtex
 @misc{ho2020denoising,
-    title={Denoising Diffusion Probabilistic Models},
-    author={Jonathan Ho and Ajay Jain and Pieter Abbeel},
-    year={2020},
-    eprint={2006.11239},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG}
+    title   = {Denoising Diffusion Probabilistic Models},
+    author  = {Jonathan Ho and Ajay Jain and Pieter Abbeel},
+    year    = {2020},
+    eprint  = {2006.11239},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG}
 }
 ```
 
 ```bibtex
-@inproceedings{
-    anonymous2021improved,
-    title={Improved Denoising Diffusion Probabilistic Models},
-    author={Anonymous},
-    booktitle={Submitted to International Conference on Learning Representations},
-    year={2021},
-    url={https://openreview.net/forum?id=-NEXDKk8gZ},
-    note={under review}
+@inproceedings{anonymous2021improved,
+    title   = {Improved Denoising Diffusion Probabilistic Models},
+    author  = {Anonymous},
+    booktitle = {Submitted to International Conference on Learning Representations},
+    year    = {2021},
+    url     = {https://openreview.net/forum?id=-NEXDKk8gZ},
+    note    = {under review}
 }
 ```

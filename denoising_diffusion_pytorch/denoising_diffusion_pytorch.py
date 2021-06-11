@@ -181,9 +181,16 @@ class LinearAttention(nn.Module):
 # model
 
 class Unet(nn.Module):
-    def __init__(self, dim, out_dim = None, dim_mults=(1, 2, 4, 8), groups = 8):
+    def __init__(
+        self,
+        dim,
+        out_dim = None,
+        dim_mults=(1, 2, 4, 8),
+        groups = 8,
+        channels = 3
+    ):
         super().__init__()
-        dims = [3, *map(lambda m: dim * m, dim_mults)]
+        dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
         self.time_pos_emb = SinusoidalPosEmb(dim)
@@ -279,8 +286,17 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     return np.clip(betas, a_min = 0, a_max = 0.999)
 
 class GaussianDiffusion(nn.Module):
-    def __init__(self, denoise_fn, timesteps=1000, loss_type='l1', betas = None):
+    def __init__(
+        self,
+        denoise_fn,
+        *,
+        image_size,
+        timesteps = 1000,
+        loss_type = 'l1',
+        betas = None
+    ):
         super().__init__()
+        self.image_size = image_size
         self.denoise_fn = denoise_fn
 
         if exists(betas):
@@ -371,7 +387,8 @@ class GaussianDiffusion(nn.Module):
         return img
 
     @torch.no_grad()
-    def sample(self, image_size, batch_size = 16):
+    def sample(self, batch_size = 16):
+        image_size = self.image_size
         return self.p_sample_loop((batch_size, 3, image_size, image_size))
 
     @torch.no_grad()
@@ -415,7 +432,8 @@ class GaussianDiffusion(nn.Module):
         return loss
 
     def forward(self, x, *args, **kwargs):
-        b, *_, device = *x.shape, x.device
+        b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
+        assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         return self.p_losses(x, t, *args, **kwargs)
 
@@ -467,7 +485,7 @@ class Trainer(object):
         self.step_start_ema = step_start_ema
 
         self.batch_size = train_batch_size
-        self.image_size = image_size
+        self.image_size = diffusion_model.image_size
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
@@ -528,7 +546,7 @@ class Trainer(object):
             if self.step != 0 and self.step % SAVE_AND_SAMPLE_EVERY == 0:
                 milestone = self.step // SAVE_AND_SAMPLE_EVERY
                 batches = num_to_groups(36, self.batch_size)
-                all_images_list = list(map(lambda n: self.ema_model.sample(self.image_size, batch_size=n), batches))
+                all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
                 all_images = torch.cat(all_images_list, dim=0)
                 utils.save_image(all_images, str(RESULTS_FOLDER / f'sample-{milestone}.png'), nrow=6)
                 self.save(milestone)
