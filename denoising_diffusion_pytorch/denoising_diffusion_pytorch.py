@@ -190,6 +190,8 @@ class Unet(nn.Module):
         channels = 3
     ):
         super().__init__()
+        self.channels = channels
+
         dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
@@ -229,7 +231,7 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
-        out_dim = default(out_dim, 3)
+        out_dim = default(out_dim, channels)
         self.final_conv = nn.Sequential(
             Block(dim, dim),
             nn.Conv2d(dim, out_dim, 1)
@@ -291,11 +293,13 @@ class GaussianDiffusion(nn.Module):
         denoise_fn,
         *,
         image_size,
+        channels = 3,
         timesteps = 1000,
         loss_type = 'l1',
         betas = None
     ):
         super().__init__()
+        self.channels = channels
         self.image_size = image_size
         self.denoise_fn = denoise_fn
 
@@ -389,7 +393,8 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def sample(self, batch_size = 16):
         image_size = self.image_size
-        return self.p_sample_loop((batch_size, 3, image_size, image_size))
+        channels = self.channels
+        return self.p_sample_loop((batch_size, channels, image_size, image_size))
 
     @torch.no_grad()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
