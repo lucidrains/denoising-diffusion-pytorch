@@ -455,7 +455,8 @@ class Dataset(data.Dataset):
             transforms.Resize(image_size),
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(image_size),
-            transforms.ToTensor()
+            transforms.ToTensor(),
+            transforms.Lambda(lambda t: (t * 2) - 1)
         ])
 
     def __len__(self):
@@ -553,7 +554,8 @@ class Trainer(object):
                 batches = num_to_groups(36, self.batch_size)
                 all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
                 all_images = torch.cat(all_images_list, dim=0)
-                utils.save_image(all_images, str(RESULTS_FOLDER / f'sample-{milestone}.png'), nrow=6)
+                all_images = (all_images + 1) * 0.5
+                utils.save_image(all_images, str(RESULTS_FOLDER / f'sample-{milestone}.png'), nrow = 6)
                 self.save(milestone)
 
             self.step += 1
