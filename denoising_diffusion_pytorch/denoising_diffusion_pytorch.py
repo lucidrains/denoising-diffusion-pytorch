@@ -22,15 +22,6 @@ try:
 except:
     APEX_AVAILABLE = False
 
-# constants
-
-SAVE_AND_SAMPLE_EVERY = 1000
-UPDATE_EMA_EVERY = 10
-EXTS = ['jpg', 'jpeg', 'png']
-
-RESULTS_FOLDER = Path('./results')
-RESULTS_FOLDER.mkdir(exist_ok = True)
-
 # helpers functions
 
 def exists(x):
@@ -445,11 +436,11 @@ class GaussianDiffusion(nn.Module):
 # dataset classes
 
 class Dataset(data.Dataset):
-    def __init__(self, folder, image_size):
+    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png']):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
-        self.paths = [p for ext in EXTS for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
 
         self.transform = transforms.Compose([
             transforms.Resize(image_size),
@@ -482,13 +473,19 @@ class Trainer(object):
         train_num_steps = 100000,
         gradient_accumulate_every = 2,
         fp16 = False,
-        step_start_ema = 2000
+        step_start_ema = 2000,
+        update_ema_every = 10,
+        save_and_sample_every = 1000,
+        results_folder = './results'
     ):
         super().__init__()
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
+        self.update_ema_every = update_ema_every
+
         self.step_start_ema = step_start_ema
+        self.save_and_sample_every = save_and_sample_every
 
         self.batch_size = train_batch_size
         self.image_size = diffusion_model.image_size
@@ -507,6 +504,9 @@ class Trainer(object):
         if fp16:
             (self.model, self.ema_model), self.opt = amp.initialize([self.model, self.ema_model], self.opt, opt_level='O1')
 
+        self.results_folder = Path(results_folder)
+        self.results_folder.mkdir(exist_ok = True)
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -524,10 +524,10 @@ class Trainer(object):
             'model': self.model.state_dict(),
             'ema': self.ema_model.state_dict()
         }
-        torch.save(data, str(RESULTS_FOLDER / f'model-{milestone}.pt'))
+        torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
 
     def load(self, milestone):
-        data = torch.load(str(RESULTS_FOLDER / f'model-{milestone}.pt'))
+        data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
 
         self.step = data['step']
         self.model.load_state_dict(data['model'])
@@ -546,16 +546,16 @@ class Trainer(object):
             self.opt.step()
             self.opt.zero_grad()
 
-            if self.step % UPDATE_EMA_EVERY == 0:
+            if self.step % self.update_ema_every == 0:
                 self.step_ema()
 
-            if self.step != 0 and self.step % SAVE_AND_SAMPLE_EVERY == 0:
-                milestone = self.step // SAVE_AND_SAMPLE_EVERY
+            if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                milestone = self.step // self.save_and_sample_every
                 batches = num_to_groups(36, self.batch_size)
                 all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
                 all_images = torch.cat(all_images_list, dim=0)
                 all_images = (all_images + 1) * 0.5
-                utils.save_image(all_images, str(RESULTS_FOLDER / f'sample-{milestone}.png'), nrow = 6)
+                utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = 6)
                 self.save(milestone)
 
             self.step += 1
