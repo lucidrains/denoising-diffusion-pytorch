@@ -111,14 +111,15 @@ class Downsample(nn.Module):
     def forward(self, x):
         return self.conv(x)
 
-class Rezero(nn.Module):
-    def __init__(self, fn):
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
-        self.g = nn.Parameter(torch.zeros(1))
+        self.norm = nn.InstanceNorm2d(dim, affine = True)
 
     def forward(self, x):
-        return self.fn(x) * self.g
+        x = self.norm(x)
+        return self.fn(x)
 
 # building block modules
 
@@ -134,12 +135,12 @@ class Block(nn.Module):
         return self.block(x)
 
 class ResnetBlock(nn.Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim, groups = 8):
+    def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
         super().__init__()
         self.mlp = nn.Sequential(
             Mish(),
             nn.Linear(time_emb_dim, dim_out)
-        )
+        ) if exists(time_emb_dim) else None
 
         self.block1 = Block(dim, dim_out)
         self.block2 = Block(dim_out, dim_out)
@@ -147,7 +148,11 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x, time_emb):
         h = self.block1(x)
-        h += self.mlp(time_emb)[:, :, None, None]
+
+        if exists(self.mlp):
+            print('hmmm')
+            h += self.mlp(time_emb)[:, :, None, None]
+
         h = self.block2(h)
         return h + self.res_conv(x)
 
@@ -178,7 +183,8 @@ class Unet(nn.Module):
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         groups = 8,
-        channels = 3
+        channels = 3,
+        with_time_emb = True
     ):
         super().__init__()
         self.channels = channels
@@ -186,12 +192,17 @@ class Unet(nn.Module):
         dims = [channels, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
-        self.time_pos_emb = SinusoidalPosEmb(dim)
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, dim * 4),
-            Mish(),
-            nn.Linear(dim * 4, dim)
-        )
+        if with_time_emb:
+            time_dim = dim
+            self.time_mlp = nn.Sequential(
+                SinusoidalPosEmb(dim),
+                nn.Linear(dim, dim * 4),
+                Mish(),
+                nn.Linear(dim * 4, dim)
+            )
+        else:
+            time_dim = None
+            self.time_mlp = None
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
@@ -201,24 +212,24 @@ class Unet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ResnetBlock(dim_in, dim_out, time_emb_dim = dim),
-                ResnetBlock(dim_out, dim_out, time_emb_dim = dim),
-                Residual(Rezero(LinearAttention(dim_out))),
+                ResnetBlock(dim_in, dim_out, time_emb_dim = time_dim),
+                ResnetBlock(dim_out, dim_out, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
                 Downsample(dim_out) if not is_last else nn.Identity()
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = dim)
-        self.mid_attn = Residual(Rezero(LinearAttention(mid_dim)))
-        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = dim)
+        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_attn = Residual(PreNorm(mid_dim, LinearAttention(mid_dim)))
+        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ResnetBlock(dim_out * 2, dim_in, time_emb_dim = dim),
-                ResnetBlock(dim_in, dim_in, time_emb_dim = dim),
-                Residual(Rezero(LinearAttention(dim_in))),
+                ResnetBlock(dim_out * 2, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
@@ -229,8 +240,7 @@ class Unet(nn.Module):
         )
 
     def forward(self, x, time):
-        t = self.time_pos_emb(time)
-        t = self.mlp(t)
+        t = self.time_mlp(time) if exists(self.time_mlp) else None
 
         h = []
 
