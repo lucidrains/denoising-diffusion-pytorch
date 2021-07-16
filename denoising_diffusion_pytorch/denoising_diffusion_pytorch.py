@@ -150,7 +150,6 @@ class ResnetBlock(nn.Module):
         h = self.block1(x)
 
         if exists(self.mlp):
-            print('hmmm')
             h += self.mlp(time_emb)[:, :, None, None]
 
         h = self.block2(h)
