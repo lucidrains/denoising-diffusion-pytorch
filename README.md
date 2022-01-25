@@ -2,7 +2,9 @@
 
 ## Denoising Diffusion Probabilistic Model, in Pytorch
 
-Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch. It is a new approach to generative modeling that may <a href="https://ajolicoeur.wordpress.com/the-new-contender-to-gans-score-matching-with-langevin-sampling/">have the potential</a> to rival GANs. It uses denoising score matching to estimate the gradient of the data distribution, followed by Langevin sampling to sample from the true distribution. This implementation was transcribed from the official Tensorflow version <a href="https://github.com/hojonathanho/diffusion">here</a>. 
+Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion Probabilistic Model</a> in Pytorch. It is a new approach to generative modeling that may <a href="https://ajolicoeur.wordpress.com/the-new-contender-to-gans-score-matching-with-langevin-sampling/">have the potential</a> to rival GANs. It uses denoising score matching to estimate the gradient of the data distribution, followed by Langevin sampling to sample from the true distribution.
+
+This implementation was transcribed from the official Tensorflow version <a href="https://github.com/hojonathanho/diffusion">here</a> and then modified to use <a href="https://arxiv.org/abs/2201.03545">ConvNext</a> blocks instead of Resnets.
 
 <img src="./sample.png" width="500px"><img>
 
@@ -95,5 +97,16 @@ Samples and model checkpoints will be logged to `./results` periodically
     year    = {2021},
     url     = {https://openreview.net/forum?id=-NEXDKk8gZ},
     note    = {under review}
+}
+```
+
+```bibtex
+@misc{liu2022convnet,
+    title   = {A ConvNet for the 2020s},
+    author  = {Zhuang Liu and Hanzi Mao and Chao-Yuan Wu and Christoph Feichtenhofer and Trevor Darrell and Saining Xie},
+    year    = {2022},
+    eprint  = {2201.03545},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
 }
 ```
