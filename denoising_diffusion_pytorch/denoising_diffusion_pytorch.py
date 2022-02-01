@@ -95,7 +95,7 @@ def Upsample(dim):
     return nn.ConvTranspose2d(dim, dim, 4, 2, 1)
 
 def Downsample(dim):
-    return nn.Conv2d(dim, dim, 3, 2, 1)
+    return nn.Conv2d(dim, dim, 4, 2, 1)
 
 class LayerNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
@@ -135,10 +135,9 @@ class ConvNextBlock(nn.Module):
 
         self.net = nn.Sequential(
             LayerNorm(dim) if norm else nn.Identity(),
-            nn.Conv2d(dim, dim_out * mult, 1),
+            nn.Conv2d(dim, dim_out * mult, 3, padding = 1),
             nn.GELU(),
-            LayerNorm(dim_out * mult),
-            nn.Conv2d(dim_out * mult, dim_out, 1)
+            nn.Conv2d(dim_out * mult, dim_out, 3, padding = 1)
         )
 
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
