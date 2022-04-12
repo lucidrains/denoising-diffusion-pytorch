@@ -335,8 +335,6 @@ class GaussianDiffusion(nn.Module):
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
 
-        to_torch = partial(torch.tensor, dtype=torch.float32)
-
         self.register_buffer('betas', betas)
         self.register_buffer('alphas_cumprod', alphas_cumprod)
         self.register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
