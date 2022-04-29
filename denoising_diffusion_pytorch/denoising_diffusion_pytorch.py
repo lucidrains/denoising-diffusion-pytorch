@@ -204,12 +204,12 @@ class Unet(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
 
         if with_time_emb:
-            time_dim = dim
+            time_dim = dim * 4
             self.time_mlp = nn.Sequential(
                 SinusoidalPosEmb(dim),
-                nn.Linear(dim, dim * 4),
+                nn.Linear(dim, time_dim),
                 nn.GELU(),
-                nn.Linear(dim * 4, dim)
+                nn.Linear(time_dim, time_dim)
             )
         else:
             time_dim = None
