@@ -192,6 +192,7 @@ class Unet(nn.Module):
     def __init__(
         self,
         dim,
+        init_dim = None,
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         channels = 3,
@@ -200,7 +201,10 @@ class Unet(nn.Module):
         super().__init__()
         self.channels = channels
 
-        dims = [channels, *map(lambda m: dim * m, dim_mults)]
+        init_dim = default(init_dim, dim // 3 * 2)
+        self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
+
+        dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
         if with_time_emb:
@@ -251,6 +255,8 @@ class Unet(nn.Module):
         )
 
     def forward(self, x, time):
+        x = self.init_conv(x)
+
         t = self.time_mlp(time) if exists(self.time_mlp) else None
 
         h = []
