@@ -34,7 +34,7 @@ diffusion = GaussianDiffusion(
     loss_type = 'l1'    # L1 or L2
 )
 
-training_images = torch.randn(8, 3, 128, 128)
+training_images = torch.randn(8, 3, 128, 128) # your images need to be normalized from a range of -1 to +1
 loss = diffusion(training_images)
 loss.backward()
 # after a lot of training
