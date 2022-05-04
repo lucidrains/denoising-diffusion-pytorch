@@ -238,7 +238,8 @@ class Unet(nn.Module):
         channels = 3,
         with_time_emb = True,
         use_convnext = False,
-        resnet_block_groups = 8
+        resnet_block_groups = 8,
+        convnext_mult = 2
     ):
         super().__init__()
 
@@ -255,7 +256,7 @@ class Unet(nn.Module):
         # resnet or convnext
 
         if use_convnext:
-            block_klass = ConvNextBlock
+            block_klass = partial(ConvNextBlock, mult = convnext_mult)
         else:
             block_klass = partial(ResnetBlock, groups = resnet_block_groups)
 
