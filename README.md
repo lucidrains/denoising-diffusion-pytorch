@@ -79,23 +79,32 @@ Samples and model checkpoints will be logged to `./results` periodically
 ## Citations
 
 ```bibtex
-@misc{ho2020denoising,
-    title   = {Denoising Diffusion Probabilistic Models},
-    author  = {Jonathan Ho and Ajay Jain and Pieter Abbeel},
-    year    = {2020},
-    eprint  = {2006.11239},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.LG}
+@inproceedings{NEURIPS2020_4c5bcfec,
+    author = {Ho, Jonathan and Jain, Ajay and Abbeel, Pieter},
+    booktitle = {Advances in Neural Information Processing Systems},
+    editor = {H. Larochelle and M. Ranzato and R. Hadsell and M.F. Balcan and H. Lin},
+    pages = {6840--6851},
+    publisher = {Curran Associates, Inc.},
+    title = {Denoising Diffusion Probabilistic Models},
+    url = {https://proceedings.neurips.cc/paper/2020/file/4c5bcfec8584af0d967f1ab10179ca4b-Paper.pdf},
+    volume = {33},
+    year = {2020}
 }
 ```
 
 ```bibtex
-@inproceedings{anonymous2021improved,
-    title   = {Improved Denoising Diffusion Probabilistic Models},
-    author  = {Anonymous},
-    booktitle = {Submitted to International Conference on Learning Representations},
-    year    = {2021},
-    url     = {https://openreview.net/forum?id=-NEXDKk8gZ},
-    note    = {under review}
+@InProceedings{pmlr-v139-nichol21a,
+    title = 	 {Improved Denoising Diffusion Probabilistic Models},
+    author =       {Nichol, Alexander Quinn and Dhariwal, Prafulla},
+    booktitle = 	 {Proceedings of the 38th International Conference on Machine Learning},
+    pages = 	 {8162--8171},
+    year = 	 {2021},
+    editor = 	 {Meila, Marina and Zhang, Tong},
+    volume = 	 {139},
+    series = 	 {Proceedings of Machine Learning Research},
+    month = 	 {18--24 Jul},
+    publisher =    {PMLR},
+    pdf = 	 {http://proceedings.mlr.press/v139/nichol21a/nichol21a.pdf},
+    url = 	 {https://proceedings.mlr.press/v139/nichol21a.html},
 }
 ```
