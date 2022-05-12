@@ -107,6 +107,10 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         model_variance = model_log_variance.exp()
 
         x_start = self.predict_start_from_noise(x, t, pred_noise)
+
+        if clip_denoised:
+            x_start.clamp_(-1., 1.)
+
         model_mean, _, _ = self.q_posterior(x_start, x, t)
 
         return model_mean, model_variance, model_log_variance
