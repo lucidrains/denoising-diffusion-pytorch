@@ -130,10 +130,12 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         # kl loss with detached model predicted mean, for stability reasons as in paper
 
-        kl = normal_kl(true_mean, true_log_variance_clipped, model_mean.detach(), model_log_variance)
+        detached_model_mean = model_mean.detach()
+
+        kl = normal_kl(true_mean, true_log_variance_clipped, detached_model_mean, model_log_variance)
         kl = meanflat(kl) * NAT
 
-        decoder_nll = -discretized_gaussian_log_likelihood(x_start, means = model_mean, log_scales = 0.5 * model_log_variance)
+        decoder_nll = -discretized_gaussian_log_likelihood(x_start, means = detached_model_mean, log_scales = 0.5 * model_log_variance)
         decoder_nll = meanflat(decoder_nll) * NAT
 
         # at the first timestep return the decoder NLL, otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
