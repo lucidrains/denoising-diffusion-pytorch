@@ -40,6 +40,12 @@ def num_to_groups(num, divisor):
         arr.append(remainder)
     return arr
 
+def normalize_to_neg_one_to_one(img):
+    return img * 2 - 1
+
+def unnormalize_to_zero_to_one(t):
+    return (t + 1) * 0.5
+
 # small helper modules
 
 class EMA():
@@ -462,6 +468,15 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
+    @property
+    def loss_fn(self):
+        if self.loss_type == 'l1':
+            return F.l1_loss
+        elif self.loss_type == 'l2':
+            return F.mse_loss
+        else:
+            raise ValueError(f'invalid loss type {self.loss_type}')
+
     def p_losses(self, x_start, t, noise = None):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -469,13 +484,7 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_recon = self.denoise_fn(x_noisy, t)
 
-        if self.loss_type == 'l1':
-            loss = (noise - x_recon).abs().mean()
-        elif self.loss_type == 'l2':
-            loss = F.mse_loss(noise, x_recon)
-        else:
-            raise NotImplementedError()
-
+        loss = self.loss_fn(noise, x_recon)
         return loss
 
     def forward(self, x, *args, **kwargs):
@@ -498,7 +507,7 @@ class Dataset(data.Dataset):
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
-            transforms.Lambda(lambda t: (t * 2) - 1)
+            transforms.Lambda(normalize_to_neg_one_to_one)
         ])
 
     def __len__(self):
@@ -602,11 +611,13 @@ class Trainer(object):
                 self.step_ema()
 
             if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                self.ema_model.eval()
+
                 milestone = self.step // self.save_and_sample_every
                 batches = num_to_groups(36, self.batch_size)
                 all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
                 all_images = torch.cat(all_images_list, dim=0)
-                all_images = (all_images + 1) * 0.5
+                all_images = unnormalize_to_zero_to_one(all_images)
                 utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = 6)
                 self.save(milestone)
 

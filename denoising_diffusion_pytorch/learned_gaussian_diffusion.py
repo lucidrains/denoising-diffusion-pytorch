@@ -4,7 +4,7 @@ from inspect import isfunction
 from torch import nn, einsum
 from einops import rearrange
 
-from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion, extract
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion, extract, unnormalize_to_zero_to_one
 
 # constants
 
@@ -58,17 +58,23 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales, thres = 0.999):
 
     return log_probs
 
-# gaussian diffusion for learned variance
+# https://arxiv.org/abs/2102.09672
+
+# i thought the results were questionable, if one were to focus only on FID
+# but may as well get this in here for others to try, as GLIDE is using it (and DALL-E2 first stage of cascade)
+# gaussian diffusion for learned variance + hybrid eps simple + vb loss
 
 class LearnedGaussianDiffusion(GaussianDiffusion):
     def __init__(
         self,
         denoise_fn,
+        vb_loss_weight = 0.001,  # lambda was 0.001 in the paper
         *args,
         **kwargs
     ):
         super().__init__(denoise_fn, *args, **kwargs)
         assert denoise_fn.out_dim == (denoise_fn.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
+        self.vb_loss_weight = vb_loss_weight
 
     def q_posterior_mean_variance(self, x_start, x_t, t):
         """
@@ -89,25 +95,51 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
             extract(self.posterior_mean_coef2 / self.posterior_mean_coef1, t, x_t.shape) * x_t
         )
 
-    def p_mean_variance(self, *, x, t, clip_denoised):
-        model_output = self.denoise_fn(x, t)
-        model_output, model_log_variance = model_output.chunk(2, dim = 1)
+    def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
+        model_output = default(model_output, lambda: self.denoise_fn(x, t))
+        pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
+
+        min_log = extract(self.posterior_log_variance_clipped, t, x.shape)
+        max_log = extract(torch.log(self.betas), t, x.shape)
+        var_interp_frac = unnormalize_to_zero_to_one(var_interp_frac_unnormalized)
+
+        model_log_variance = var_interp_frac * max_log + (1 - var_interp_frac) * min_log
         model_variance = model_log_variance.exp()
-        return model_output, model_variance, model_log_variance
+
+        x_start = self.predict_start_from_noise(x, t, pred_noise)
+        model_mean, _, _ = self.q_posterior(x_start, x, t)
+
+        return model_mean, model_variance, model_log_variance
 
     def p_losses(self, x_start, t, noise = None, clip_denoised = False):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
-        true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(x_start = x_start, x_t = x_t, t = t)
-        model_mean, _, model_log_variance = self.p_mean_variance(x = x_t, t = t, clip_denoised = clip_denoised)
+        # model output
 
-        kl = normal_kl(true_mean, true_log_variance_clipped, model_mean, model_log_variance)
+        model_output = self.denoise_fn(x_t, t)
+
+        # calculating kl loss for learned variance (interpolation)
+
+        true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(x_start = x_start, x_t = x_t, t = t)
+        model_mean, _, model_log_variance = self.p_mean_variance(x = x_t, t = t, clip_denoised = clip_denoised, model_output = model_output)
+
+        # kl loss with detached model predicted mean, for stability reasons as in paper
+
+        kl = normal_kl(true_mean, true_log_variance_clipped, model_mean.detach(), model_log_variance)
         kl = meanflat(kl) * NAT
 
         decoder_nll = -discretized_gaussian_log_likelihood(x_start, means = model_mean, log_scales = 0.5 * model_log_variance)
         decoder_nll = meanflat(decoder_nll) * NAT
 
-        # At the first timestep return the decoder NLL, otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
-        losses = torch.where(t == 0, decoder_nll, kl)
-        return losses.mean()
+        # at the first timestep return the decoder NLL, otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
+
+        vb_losses = torch.where(t == 0, decoder_nll, kl)
+
+        # simple loss - predicting noise, x0, or x_prev
+
+        pred_noise, _ = model_output.chunk(2, dim = 1)
+
+        simple_losses = self.loss_fn(pred_noise, noise)
+
+        return simple_losses + vb_losses.mean() * self.vb_loss_weight
