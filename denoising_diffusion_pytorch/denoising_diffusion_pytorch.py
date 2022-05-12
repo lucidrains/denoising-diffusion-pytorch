@@ -204,7 +204,8 @@ class Unet(nn.Module):
         dim_mults=(1, 2, 4, 8),
         channels = 3,
         with_time_emb = True,
-        resnet_block_groups = 8
+        resnet_block_groups = 8,
+        learned_variance = False
     ):
         super().__init__()
 
@@ -265,10 +266,12 @@ class Unet(nn.Module):
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
 
-        out_dim = default(out_dim, channels)
+        default_out_dim = channels * (1 if not learned_variance else 2)
+        self.out_dim = default(out_dim, default_out_dim)
+
         self.final_conv = nn.Sequential(
             block_klass(dim, dim),
-            nn.Conv2d(dim, out_dim, 1)
+            nn.Conv2d(dim, self.out_dim, 1)
         )
 
     def forward(self, x, time):
@@ -320,7 +323,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * torch.pi * 0.5) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-    return torch.clip(betas, 0, 0.9999)
+    return torch.clip(betas, 0, 0.999)
 
 class GaussianDiffusion(nn.Module):
     def __init__(
@@ -333,6 +336,8 @@ class GaussianDiffusion(nn.Module):
         loss_type = 'l1'
     ):
         super().__init__()
+        assert not (type(self) == GaussianDiffusion and denoise_fn.channels != denoise_fn.out_dim)
+
         self.channels = channels
         self.image_size = image_size
         self.denoise_fn = denoise_fn
