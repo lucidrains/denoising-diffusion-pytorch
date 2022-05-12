@@ -88,13 +88,6 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def predict_xstart_from_xprev(self, x_t, t, xprev):
-        # (xprev - coef2*x_t) / coef1
-        return (
-            extract(1. / self.posterior_mean_coef1, t, x_t.shape) * xprev -
-            extract(self.posterior_mean_coef2 / self.posterior_mean_coef1, t, x_t.shape) * x_t
-        )
-
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
         model_output = default(model_output, lambda: self.denoise_fn(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
