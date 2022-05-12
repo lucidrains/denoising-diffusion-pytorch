@@ -76,18 +76,6 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         assert denoise_fn.out_dim == (denoise_fn.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
         self.vb_loss_weight = vb_loss_weight
 
-    def q_posterior_mean_variance(self, x_start, x_t, t):
-        """
-        Compute the mean and variance of the diffusion posterior q(x_{t-1} | x_t, x_0)
-        """
-        posterior_mean = (
-            extract(self.posterior_mean_coef1, t, x_t.shape) * x_start +
-            extract(self.posterior_mean_coef2, t, x_t.shape) * x_t
-        )
-        posterior_variance = extract(self.posterior_variance, t, x_t.shape)
-        posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
-        return posterior_mean, posterior_variance, posterior_log_variance_clipped
-
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
         model_output = default(model_output, lambda: self.denoise_fn(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
@@ -118,7 +106,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         # calculating kl loss for learned variance (interpolation)
 
-        true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(x_start = x_start, x_t = x_t, t = t)
+        true_mean, _, true_log_variance_clipped = self.q_posterior(x_start = x_start, x_t = x_t, t = t)
         model_mean, _, model_log_variance = self.p_mean_variance(x = x_t, t = t, clip_denoised = clip_denoised, model_output = model_output)
 
         # kl loss with detached model predicted mean, for stability reasons as in paper
