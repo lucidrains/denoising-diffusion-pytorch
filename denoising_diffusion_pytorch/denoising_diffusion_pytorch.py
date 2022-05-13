@@ -339,7 +339,8 @@ class GaussianDiffusion(nn.Module):
         image_size,
         channels = 3,
         timesteps = 1000,
-        loss_type = 'l1'
+        loss_type = 'l1',
+        objective = 'pred_noise'
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and denoise_fn.channels != denoise_fn.out_dim)
@@ -347,6 +348,7 @@ class GaussianDiffusion(nn.Module):
         self.channels = channels
         self.image_size = image_size
         self.denoise_fn = denoise_fn
+        self.objective = objective
 
         betas = cosine_beta_schedule(timesteps)
 
@@ -404,12 +406,19 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(self, x, t, clip_denoised: bool):
-        x_recon = self.predict_start_from_noise(x, t=t, noise=self.denoise_fn(x, t))
+        model_output = self.denoise_fn(x, t)
+
+        if self.objective == 'pred_noise':
+            x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
+        elif self.objective == 'pred_x0':
+            x_start = model_output
+        else:
+            raise ValueError(f'unknown objective {self.objective}')
 
         if clip_denoised:
-            x_recon.clamp_(-1., 1.)
+            x_start.clamp_(-1., 1.)
 
-        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start=x_recon, x_t=x, t=t)
+        model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
@@ -475,10 +484,17 @@ class GaussianDiffusion(nn.Module):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
 
-        x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        x_recon = self.denoise_fn(x_noisy, t)
+        x = self.q_sample(x_start=x_start, t=t, noise=noise)
+        model_out = self.denoise_fn(x, t)
 
-        loss = self.loss_fn(noise, x_recon)
+        if self.objective == 'pred_noise':
+            target = noise
+        elif self.objective == 'pred_x0':
+            target = x_start
+        else:
+            raise ValueError(f'unknown objective {self.objective}')
+
+        loss = self.loss_fn(model_out, target)
         return loss
 
     def forward(self, x, *args, **kwargs):
