@@ -440,7 +440,7 @@ class GaussianDiffusion(nn.Module):
         for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
 
-        img = normalize_to_neg_one_to_one(img)
+        img = unnormalize_to_zero_to_one(img)
         return img
 
     @torch.no_grad()
