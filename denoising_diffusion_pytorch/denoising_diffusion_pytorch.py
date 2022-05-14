@@ -439,6 +439,8 @@ class GaussianDiffusion(nn.Module):
 
         for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
+
+        img = normalize_to_neg_one_to_one(img)
         return img
 
     @torch.no_grad()
@@ -497,11 +499,13 @@ class GaussianDiffusion(nn.Module):
         loss = self.loss_fn(model_out, target)
         return loss
 
-    def forward(self, x, *args, **kwargs):
-        b, c, h, w, device, img_size, = *x.shape, x.device, self.image_size
+    def forward(self, img, *args, **kwargs):
+        b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
-        return self.p_losses(x, t, *args, **kwargs)
+
+        img = normalize_to_neg_one_to_one(img)
+        return self.p_losses(img, t, *args, **kwargs)
 
 # dataset classes
 
@@ -516,8 +520,7 @@ class Dataset(data.Dataset):
             transforms.Resize(image_size),
             transforms.RandomHorizontalFlip(),
             transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Lambda(normalize_to_neg_one_to_one)
+            transforms.ToTensor()
         ])
 
     def __len__(self):
@@ -629,7 +632,6 @@ class Trainer(object):
                     batches = num_to_groups(36, self.batch_size)
                     all_images_list = list(map(lambda n: self.ema_model.sample(batch_size=n), batches))
                     all_images = torch.cat(all_images_list, dim=0)
-                    all_images = unnormalize_to_zero_to_one(all_images)
                     utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = 6)
                     self.save(milestone)
 
