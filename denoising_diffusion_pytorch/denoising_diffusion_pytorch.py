@@ -329,6 +329,12 @@ def noise_like(shape, device, repeat=False):
     noise = lambda: torch.randn(shape, device=device)
     return repeat_noise() if repeat else noise()
 
+def linear_beta_schedule(timesteps):
+    scale = 1000 / timesteps
+    beta_start = scale * 0.0001
+    beta_end = scale * 0.02
+    return torch.linspace(beta_start, beta_end, timesteps, dtype = torch.float64)
+
 def cosine_beta_schedule(timesteps, s = 0.008):
     """
     cosine schedule
@@ -350,7 +356,8 @@ class GaussianDiffusion(nn.Module):
         channels = 3,
         timesteps = 1000,
         loss_type = 'l1',
-        objective = 'pred_noise'
+        objective = 'pred_noise',
+        beta_schedule = 'cosine'
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and denoise_fn.channels != denoise_fn.out_dim)
@@ -360,7 +367,12 @@ class GaussianDiffusion(nn.Module):
         self.denoise_fn = denoise_fn
         self.objective = objective
 
-        betas = cosine_beta_schedule(timesteps)
+        if beta_schedule == 'linear':
+            betas = linear_beta_schedule(timesteps)
+        elif beta_schedule == 'cosine':
+            betas = cosine_beta_schedule(timesteps)
+        else:
+            raise ValueError(f'unknown beta schedule {beta_schedule}')
 
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, axis=0)
