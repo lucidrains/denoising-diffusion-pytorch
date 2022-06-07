@@ -108,3 +108,14 @@ Samples and model checkpoints will be logged to `./results` periodically
     url         = {https://proceedings.mlr.press/v139/nichol21a.html},
 }
 ```
+
+```bibtex
+@inproceedings{kingma2021on,
+    title       = {On Density Estimation with Diffusion Models},
+    author      = {Diederik P Kingma and Tim Salimans and Ben Poole and Jonathan Ho},
+    booktitle   = {Advances in Neural Information Processing Systems},
+    editor      = {A. Beygelzimer and Y. Dauphin and P. Liang and J. Wortman Vaughan},
+    year        = {2021},
+    url         = {https://openreview.net/forum?id=2LdBqxc1Yv}
+}
+```
