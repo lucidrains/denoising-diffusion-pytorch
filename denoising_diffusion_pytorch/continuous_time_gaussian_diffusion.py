@@ -131,6 +131,10 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         batch, *_, device = *x.shape, x.device
 
         model_mean, model_variance = self.p_mean_variance(x = x, time = time, time_next = time_next)
+
+        if time_next == 0:
+            return model_mean
+
         noise = torch.randn_like(x)
         return model_mean + sqrt(model_variance) * noise
 
