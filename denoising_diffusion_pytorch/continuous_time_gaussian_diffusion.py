@@ -6,6 +6,7 @@ from torch.special import expm1
 
 from tqdm import tqdm
 from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 
 # helpers
 
@@ -33,6 +34,24 @@ def right_pad_dims_to(x, t):
         return t
     return t.view(*t.shape, *((1,) * padding_dims))
 
+# neural net helpers
+
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x):
+        return x + self.fn(x)
+
+class MonotonicLinear(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.net = nn.Linear(*args, **kwargs)
+
+    def forward(self, x):
+        return F.linear(x, self.net.weight.abs(), self.net.bias.abs())
+
 # continuous schedules
 
 # equations are taken from https://openreview.net/attachment?id=2LdBqxc1Yv&name=supplementary_material
@@ -47,10 +66,40 @@ def alpha_cosine_log_snr(t):
     raise NotImplementedError
 
 class learned_noise_schedule(nn.Module):
-    def __init__(self):
+    """ described in section H and then I.2 of the supplementary material for variational ddpm paper """
+
+    def __init__(
+        self,
+        *,
+        log_snr_max,
+        log_snr_min,
+        hidden_dim = 1024
+    ):
         super().__init__()
-        raise NotImplementedError
-        # learned noise schedule, using learned monotonic MLP (weights kept positive) in the paper
+        self.slope = log_snr_min - log_snr_max
+        self.intercept = log_snr_max
+
+        self.net = nn.Sequential(
+            Rearrange('... -> ... 1'),
+            MonotonicLinear(1, 1),
+            Residual(nn.Sequential(
+                MonotonicLinear(1, hidden_dim),
+                nn.Sigmoid(),
+                MonotonicLinear(hidden_dim, 1)
+            )),
+            Rearrange('... 1 -> ...'),
+        )
+
+    def forward(self, x):
+        device = x.device
+
+        out_zero = self.net(torch.zeros_like(x))
+        out_one =  self.net(torch.ones_like(x))
+
+        x = self.net(x)
+
+        normalized = self.slope * ((x - out_one) / (out_zero - out_one)) + self.intercept
+        return normalized
 
 class ContinuousTimeGaussianDiffusion(nn.Module):
     def __init__(
@@ -79,6 +128,13 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
         if noise_schedule == 'linear':
             self.log_snr = beta_linear_log_snr
+        elif noise_schedule == 'learned':
+            log_snr_max, log_snr_min = [beta_linear_log_snr(torch.tensor([time])).item() for time in (0., 1.)]
+
+            self.log_snr = learned_noise_schedule(
+                log_snr_max = log_snr_max,
+                log_snr_min = log_snr_min
+            )
         else:
             raise ValueError(f'unknown noise schedule {noise_schedule}')
 
