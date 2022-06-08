@@ -16,6 +16,7 @@ from PIL import Image
 
 from tqdm import tqdm
 from einops import rearrange
+from einops.layers.torch import Rearrange
 
 # helpers functions
 
@@ -211,6 +212,18 @@ class Attention(nn.Module):
 
 # model
 
+def MLP(dim_in, dim_hidden):
+    return nn.Sequential(
+        Rearrange('... -> ... 1'),
+        nn.Linear(1, dim_hidden),
+        nn.GELU(),
+        nn.LayerNorm(dim_hidden),
+        nn.Linear(dim_hidden, dim_hidden),
+        nn.GELU(),
+        nn.LayerNorm(dim_hidden),
+        nn.Linear(dim_hidden, dim_hidden)
+    )
+
 class Unet(nn.Module):
     def __init__(
         self,
@@ -219,9 +232,9 @@ class Unet(nn.Module):
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         channels = 3,
-        with_time_emb = True,
         resnet_block_groups = 8,
-        learned_variance = False
+        learned_variance = False,
+        sinusoidal_cond_mlp = True
     ):
         super().__init__()
 
@@ -239,8 +252,11 @@ class Unet(nn.Module):
 
         # time embeddings
 
-        if with_time_emb:
-            time_dim = dim * 4
+        time_dim = dim * 4
+
+        self.sinusoidal_cond_mlp = sinusoidal_cond_mlp
+
+        if sinusoidal_cond_mlp:
             self.time_mlp = nn.Sequential(
                 SinusoidalPosEmb(dim),
                 nn.Linear(dim, time_dim),
@@ -248,8 +264,7 @@ class Unet(nn.Module):
                 nn.Linear(time_dim, time_dim)
             )
         else:
-            time_dim = None
-            self.time_mlp = None
+            self.time_mlp = MLP(1, time_dim)
 
         # layers
 
@@ -292,8 +307,7 @@ class Unet(nn.Module):
 
     def forward(self, x, time):
         x = self.init_conv(x)
-
-        t = self.time_mlp(time) if exists(self.time_mlp) else None
+        t = self.time_mlp(time)
 
         h = []
 

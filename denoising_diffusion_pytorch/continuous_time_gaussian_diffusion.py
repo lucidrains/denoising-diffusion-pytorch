@@ -65,6 +65,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         num_sample_steps = 500
     ):
         super().__init__()
+        assert not denoise_fn.sinusoidal_cond_mlp
 
         self.denoise_fn = denoise_fn
 
