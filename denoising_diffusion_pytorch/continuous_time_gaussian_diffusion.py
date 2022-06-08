@@ -111,7 +111,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         loss_type = 'l1',
         noise_schedule = 'linear',
         num_sample_steps = 500,
-        clip_sample_after_noise = False
+        clip_after_noising_during_sampling = False,
+        learned_schedule_net_hidden_dim = 1024
     ):
         super().__init__()
         assert not denoise_fn.sinusoidal_cond_mlp
@@ -134,7 +135,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
             self.log_snr = learned_noise_schedule(
                 log_snr_max = log_snr_max,
-                log_snr_min = log_snr_min
+                log_snr_min = log_snr_min,
+                hidden_dim = learned_schedule_net_hidden_dim
             )
         else:
             raise ValueError(f'unknown noise schedule {noise_schedule}')
@@ -145,7 +147,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
         # clipping related hyperparameters
 
-        self.clip_sample_after_noise = clip_sample_after_noise
+        self.clip_after_noising_during_sampling = clip_after_noising_during_sampling
 
     @property
     def device(self):
@@ -208,7 +210,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
             times_next = steps[i + 1]
             img = self.p_sample(img, times, times_next)
 
-            if self.clip_sample_after_noise:
+            if self.clip_after_noising_during_sampling:
                 # clip after noise is added. perhaps this is sufficient for Imagen dynamic thresholding?
                 img.clamp_(-1., 1.)
 
