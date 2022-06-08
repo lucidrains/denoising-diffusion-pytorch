@@ -73,7 +73,8 @@ class learned_noise_schedule(nn.Module):
         *,
         log_snr_max,
         log_snr_min,
-        hidden_dim = 1024
+        hidden_dim = 1024,
+        frac_gradient = 1.
     ):
         super().__init__()
         self.slope = log_snr_min - log_snr_max
@@ -90,7 +91,10 @@ class learned_noise_schedule(nn.Module):
             Rearrange('... 1 -> ...'),
         )
 
+        self.frac_gradient = frac_gradient
+
     def forward(self, x):
+        frac_gradient = self.frac_gradient
         device = x.device
 
         out_zero = self.net(torch.zeros_like(x))
@@ -98,8 +102,8 @@ class learned_noise_schedule(nn.Module):
 
         x = self.net(x)
 
-        normalized = self.slope * ((x - out_zero) / (out_one - out_zero)) + self.intercept
-        return normalized
+        normed = self.slope * ((x - out_zero) / (out_one - out_zero)) + self.intercept
+        return normed * frac_gradient + normed.detach() * (1 - frac_gradient)
 
 class ContinuousTimeGaussianDiffusion(nn.Module):
     def __init__(
@@ -112,7 +116,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         noise_schedule = 'linear',
         num_sample_steps = 500,
         clip_after_noising_during_sampling = False,
-        learned_schedule_net_hidden_dim = 1024
+        learned_schedule_net_hidden_dim = 1024,
+        learned_noise_schedule_frac_gradient = 1.   # between 0 and 1, determines what percentage of gradients go back, so one can update the learned noise schedule more slowly
     ):
         super().__init__()
         assert not denoise_fn.sinusoidal_cond_mlp
@@ -136,7 +141,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
             self.log_snr = learned_noise_schedule(
                 log_snr_max = log_snr_max,
                 log_snr_min = log_snr_min,
-                hidden_dim = learned_schedule_net_hidden_dim
+                hidden_dim = learned_schedule_net_hidden_dim,
+                frac_gradient = learned_noise_schedule_frac_gradient
             )
         else:
             raise ValueError(f'unknown noise schedule {noise_schedule}')
