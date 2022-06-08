@@ -98,7 +98,7 @@ class learned_noise_schedule(nn.Module):
 
         x = self.net(x)
 
-        normalized = self.slope * ((x - out_one) / (out_zero - out_one)) + self.intercept
+        normalized = self.slope * ((x - out_zero) / (out_one - out_zero)) + self.intercept
         return normalized
 
 class ContinuousTimeGaussianDiffusion(nn.Module):
@@ -110,7 +110,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         channels = 3,
         loss_type = 'l1',
         noise_schedule = 'linear',
-        num_sample_steps = 500
+        num_sample_steps = 500,
+        clip_sample_after_noise = False
     ):
         super().__init__()
         assert not denoise_fn.sinusoidal_cond_mlp
@@ -141,6 +142,10 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         # sampling
 
         self.num_sample_steps = num_sample_steps
+
+        # clipping related hyperparameters
+
+        self.clip_sample_after_noise = clip_sample_after_noise
 
     @property
     def device(self):
@@ -203,9 +208,12 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
             times_next = steps[i + 1]
             img = self.p_sample(img, times, times_next)
 
-        img.clamp_(-1., 1.)
+            if self.clip_sample_after_noise:
+                # clip after noise is added. perhaps this is sufficient for Imagen dynamic thresholding?
+                img.clamp_(-1., 1.)
+
         img = unnormalize_to_zero_to_one(img)
-        return img
+        return img.clamp(0., 1.)
 
     @torch.no_grad()
     def sample(self, batch_size = 16):
