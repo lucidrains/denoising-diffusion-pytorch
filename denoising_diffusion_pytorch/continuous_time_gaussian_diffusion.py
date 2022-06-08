@@ -115,7 +115,6 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         loss_type = 'l1',
         noise_schedule = 'linear',
         num_sample_steps = 500,
-        clip_after_noising_during_sampling = False,
         learned_schedule_net_hidden_dim = 1024,
         learned_noise_schedule_frac_gradient = 1.   # between 0 and 1, determines what percentage of gradients go back, so one can update the learned noise schedule more slowly
     ):
@@ -150,10 +149,6 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         # sampling
 
         self.num_sample_steps = num_sample_steps
-
-        # clipping related hyperparameters
-
-        self.clip_after_noising_during_sampling = clip_after_noising_during_sampling
 
     @property
     def device(self):
@@ -216,12 +211,9 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
             times_next = steps[i + 1]
             img = self.p_sample(img, times, times_next)
 
-            if self.clip_after_noising_during_sampling:
-                # clip after noise is added. perhaps this is sufficient for Imagen dynamic thresholding?
-                img.clamp_(-1., 1.)
-
+        img.clamp_(-1., 1.)
         img = unnormalize_to_zero_to_one(img)
-        return img.clamp(0., 1.)
+        return img
 
     @torch.no_grad()
     def sample(self, batch_size = 16):
