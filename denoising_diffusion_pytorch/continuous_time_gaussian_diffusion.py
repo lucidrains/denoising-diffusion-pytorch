@@ -59,7 +59,6 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         *,
         image_size,
         channels = 3,
-        cond_scale = 500,
         loss_type = 'l1',
         noise_schedule = 'linear',
         num_sample_steps = 500
@@ -76,7 +75,6 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
         # continuous noise schedule related stuff
 
-        self.cond_scale = cond_scale # the log(snr) will be scaled by this value
         self.loss_type = loss_type
 
         if noise_schedule == 'linear':
@@ -108,17 +106,15 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         # todo - derive x_start from the posterior mean and do dynamic thresholding
         # assumed that is what is going on in Imagen
 
-        batch = x.shape[0]
-        batch_time = repeat(time, ' -> b', b = batch)
-
-        pred_noise = self.denoise_fn(x, batch_time * self.cond_scale)
-
         log_snr = self.log_snr(time)
         log_snr_next = self.log_snr(time_next)
         c = -expm1(log_snr - log_snr_next)
 
         squared_alpha, squared_alpha_next = log_snr.sigmoid(), log_snr_next.sigmoid()
         squared_sigma, squared_sigma_next = (-log_snr).sigmoid(), (-log_snr_next).sigmoid()
+
+        batch_log_snr = repeat(log_snr, ' -> b', b = x.shape[0])
+        pred_noise = self.denoise_fn(x, batch_log_snr)
 
         model_mean = sqrt(squared_alpha_next / squared_alpha) * (x - c * sqrt(squared_sigma) * pred_noise)
         posterior_variance = squared_sigma_next * c
@@ -151,6 +147,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
             times_next = steps[i + 1]
             img = self.p_sample(img, times, times_next)
 
+        img.clamp_(-1., 1.)
         img = unnormalize_to_zero_to_one(img)
         return img
 
@@ -180,7 +177,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
         x, log_snr = self.q_sample(x_start = x_start, times = times, noise = noise)
 
-        model_out = self.denoise_fn(x, log_snr * self.cond_scale)
+        model_out = self.denoise_fn(x, log_snr)
         return self.loss_fn(model_out, noise)
 
     def forward(self, img, *args, **kwargs):
