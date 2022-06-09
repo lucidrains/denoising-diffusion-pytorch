@@ -121,3 +121,13 @@ Samples and model checkpoints will be logged to `./results` periodically
     url         = {https://openreview.net/forum?id=2LdBqxc1Yv}
 }
 ```
+
+```bibtex
+@article{Choi2022PerceptionPT,
+    title   = {Perception Prioritized Training of Diffusion Models},
+    author  = {Jooyoung Choi and Jungbeom Lee and Chaehun Shin and Sungwon Kim and Hyunwoo J. Kim and Sung-Hoon Yoon},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2204.00227}
+}
+```
