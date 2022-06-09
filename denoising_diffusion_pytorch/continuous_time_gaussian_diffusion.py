@@ -115,6 +115,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         loss_type = 'l1',
         noise_schedule = 'linear',
         num_sample_steps = 500,
+        clip_sample_denoised = True,
         learned_schedule_net_hidden_dim = 1024,
         learned_noise_schedule_frac_gradient = 1.   # between 0 and 1, determines what percentage of gradients go back, so one can update the learned noise schedule more slowly
     ):
@@ -149,6 +150,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         # sampling
 
         self.num_sample_steps = num_sample_steps
+        self.clip_sample_denoised = clip_sample_denoised
 
     @property
     def device(self):
@@ -167,9 +169,6 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         # reviewer found an error in the equation in the paper (missing sigma)
         # following - https://openreview.net/forum?id=2LdBqxc1Yv&noteId=rIQgH0zKsRt
 
-        # todo - derive x_start from the posterior mean and do dynamic thresholding
-        # assumed that is what is going on in Imagen
-
         log_snr = self.log_snr(time)
         log_snr_next = self.log_snr(time_next)
         c = -expm1(log_snr - log_snr_next)
@@ -177,10 +176,21 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         squared_alpha, squared_alpha_next = log_snr.sigmoid(), log_snr_next.sigmoid()
         squared_sigma, squared_sigma_next = (-log_snr).sigmoid(), (-log_snr_next).sigmoid()
 
+        alpha, sigma, alpha_next = map(sqrt, (squared_alpha, squared_sigma, squared_alpha_next))
+
         batch_log_snr = repeat(log_snr, ' -> b', b = x.shape[0])
         pred_noise = self.denoise_fn(x, batch_log_snr)
 
-        model_mean = sqrt(squared_alpha_next / squared_alpha) * (x - c * sqrt(squared_sigma) * pred_noise)
+        if self.clip_sample_denoised:
+            x_start = (x - sigma * pred_noise) / alpha
+
+            # in Imagen, this was changed to dynamic thresholding
+            x_start.clamp_(-1., 1.)
+
+            model_mean = alpha_next * (x * (1 - c) / alpha + c * x_start)
+        else:
+            model_mean = alpha_next / alpha * (x - c * sigma * pred_noise)
+
         posterior_variance = squared_sigma_next * c
 
         return model_mean, posterior_variance
