@@ -59,11 +59,14 @@ class MonotonicLinear(nn.Module):
 
 # log(snr) that approximates the original linear schedule
 
-def beta_linear_log_snr(t):
-    return -torch.log(expm1(1e-4 + 10 * (t ** 2)))
+def log(t, eps = 1e-20):
+    return torch.log(t.clamp(min = eps))
 
-def alpha_cosine_log_snr(t):
-    raise NotImplementedError
+def beta_linear_log_snr(t):
+    return -log(expm1(1e-4 + 10 * (t ** 2)))
+
+def alpha_cosine_log_snr(t, s = 0.008):
+    return -log((torch.cos((t + s) / (1 + s) * torch.pi * 0.5) ** -2) - 1)
 
 class learned_noise_schedule(nn.Module):
     """ described in section H and then I.2 of the supplementary material for variational ddpm paper """
@@ -135,6 +138,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
         if noise_schedule == 'linear':
             self.log_snr = beta_linear_log_snr
+        elif noise_schedule == 'cosine':
+            self.log_snr = alpha_cosine_log_snr
         elif noise_schedule == 'learned':
             log_snr_max, log_snr_min = [beta_linear_log_snr(torch.tensor([time])).item() for time in (0., 1.)]
 
