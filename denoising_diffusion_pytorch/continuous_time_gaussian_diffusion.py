@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.special import expm1
 
 from tqdm import tqdm
-from einops import rearrange, repeat
+from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
 # helpers
@@ -268,7 +268,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         model_out = self.denoise_fn(x, log_snr)
 
         losses = self.loss_fn(model_out, noise, reduction = 'none')
-        losses = losses.mean(dim = tuple(range(1, losses.ndim)))
+        losses = reduce(losses, 'b ... -> b', 'mean')
 
         if self.p2_loss_weight_gamma >= 0:
             # following eq 8. in https://arxiv.org/abs/2204.00227

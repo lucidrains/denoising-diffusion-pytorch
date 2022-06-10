@@ -541,7 +541,7 @@ class GaussianDiffusion(nn.Module):
 # dataset classes
 
 class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png']):
+    def __init__(self, folder, image_size, exts = ['jpg', 'jpeg', 'png'], augment_horizontal_flip = False):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
@@ -549,7 +549,7 @@ class Dataset(data.Dataset):
 
         self.transform = transforms.Compose([
             transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(),
+            transforms.RandomHorizontalFlip() if augment_horizontal_flip else nn.Identity(),
             transforms.CenterCrop(image_size),
             transforms.ToTensor()
         ])
@@ -580,7 +580,8 @@ class Trainer(object):
         step_start_ema = 2000,
         update_ema_every = 10,
         save_and_sample_every = 1000,
-        results_folder = './results'
+        results_folder = './results',
+        augment_horizontal_flip = True
     ):
         super().__init__()
         self.model = diffusion_model
@@ -596,7 +597,7 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
-        self.ds = Dataset(folder, image_size)
+        self.ds = Dataset(folder, image_size, augment_horizontal_flip = augment_horizontal_flip)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
 
