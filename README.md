@@ -6,7 +6,7 @@ Implementation of <a href="https://arxiv.org/abs/2006.11239">Denoising Diffusion
 
 This implementation was transcribed from the official Tensorflow version <a href="https://github.com/hojonathanho/diffusion">here</a>
 
-<a href="https://www.youtube.com/watch?v=HoKDTa5jHvg">Youtube AI Educator</a>
+Youtube AI Educators - <a href="https://www.youtube.com/watch?v=W-O7AZNzbzQ">Yannic Kilcher</a> | <a href="https://www.youtube.com/watch?v=HoKDTa5jHvg">Outlier</a>
 
 <a href="https://huggingface.co/blog/annotated-diffusion">Annotated code</a> by Research Scientists / Engineers from <a href="https://huggingface.co/">🤗 Huggingface</a>
 
