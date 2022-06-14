@@ -16,7 +16,7 @@ from torchvision import transforms, utils
 from PIL import Image
 
 from tqdm import tqdm
-from einops import rearrange
+from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 
 # helpers functions
@@ -367,7 +367,9 @@ class GaussianDiffusion(nn.Module):
         timesteps = 1000,
         loss_type = 'l1',
         objective = 'pred_noise',
-        beta_schedule = 'cosine'
+        beta_schedule = 'cosine',
+        p2_loss_weight_gamma = 0., # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time - 1. is recommended
+        p2_loss_weight_k = 1
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and denoise_fn.channels != denoise_fn.out_dim)
@@ -421,6 +423,10 @@ class GaussianDiffusion(nn.Module):
         register_buffer('posterior_log_variance_clipped', torch.log(posterior_variance.clamp(min =1e-20)))
         register_buffer('posterior_mean_coef1', betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         register_buffer('posterior_mean_coef2', (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
+
+        # calculate p2 reweighting
+
+        register_buffer('p2_loss_weight', (p2_loss_weight_k + alphas_cumprod / (1 - alphas_cumprod)) ** -p2_loss_weight_gamma)
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (
@@ -528,8 +534,11 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = self.loss_fn(model_out, target)
-        return loss
+        loss = self.loss_fn(model_out, target, reduction = 'none')
+        loss = reduce(loss, 'b ... -> b (...)', 'mean')
+
+        loss = loss * extract(self.p2_loss_weight, t, loss.shape)
+        return loss.mean()
 
     def forward(self, img, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
