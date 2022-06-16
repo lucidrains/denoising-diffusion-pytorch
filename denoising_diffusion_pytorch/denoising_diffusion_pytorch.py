@@ -302,12 +302,14 @@ class Unet(nn.Module):
         self.out_dim = default(out_dim, default_out_dim)
 
         self.final_conv = nn.Sequential(
-            block_klass(dim, dim),
+            block_klass(dim * 2, dim),
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
     def forward(self, x, time):
         x = self.init_conv(x)
+        r = x.clone()
+
         t = self.time_mlp(time)
 
         h = []
@@ -330,6 +332,7 @@ class Unet(nn.Module):
             x = attn(x)
             x = upsample(x)
 
+        x = torch.cat((x, r), dim = 1)
         return self.final_conv(x)
 
 # gaussian diffusion trainer class
