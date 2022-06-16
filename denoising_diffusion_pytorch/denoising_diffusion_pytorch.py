@@ -302,7 +302,7 @@ class Unet(nn.Module):
         self.out_dim = default(out_dim, default_out_dim)
 
         self.final_conv = nn.Sequential(
-            block_klass(dim, dim),
+            block_klass(dim * 2, dim),
             nn.Conv2d(dim, self.out_dim, 1)
         )
 
@@ -324,12 +324,13 @@ class Unet(nn.Module):
         x = self.mid_block2(x, t)
 
         for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
+            x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
             x = block2(x, t)
             x = attn(x)
             x = upsample(x)
 
+        x = torch.cat((x, h.pop()), dim = 1)
         return self.final_conv(x)
 
 # gaussian diffusion trainer class
