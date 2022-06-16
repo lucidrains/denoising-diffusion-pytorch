@@ -243,7 +243,7 @@ class Unet(nn.Module):
 
         self.channels = channels
 
-        init_dim = default(init_dim, dim // 3 * 2)
+        init_dim = default(init_dim, dim)
         self.init_conv = nn.Conv2d(channels, init_dim, 7, padding = 3)
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
@@ -288,8 +288,8 @@ class Unet(nn.Module):
         self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim)))
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+            is_last = ind == (len(in_out) - 1)
 
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out * 2, dim_in, time_emb_dim = time_dim),
@@ -324,7 +324,7 @@ class Unet(nn.Module):
         x = self.mid_block2(x, t)
 
         for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim=1)
+            x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
             x = block2(x, t)
             x = attn(x)
