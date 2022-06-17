@@ -597,7 +597,6 @@ class Trainer(object):
         folder,
         *,
         ema_decay = 0.995,
-        image_size = 128,
         train_batch_size = 32,
         train_lr = 1e-4,
         train_num_steps = 100000,
@@ -610,6 +609,8 @@ class Trainer(object):
         augment_horizontal_flip = True
     ):
         super().__init__()
+        self.image_size = diffusion_model.image_size
+
         self.model = diffusion_model
         self.ema = EMA(ema_decay)
         self.ema_model = copy.deepcopy(self.model)
@@ -623,9 +624,9 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
-        self.ds = Dataset(folder, image_size, augment_horizontal_flip = augment_horizontal_flip)
+        self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip)
         self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count()))
-        self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
+        self.opt = Adam(diffusion_model.parameters(), lr = train_lr)
 
         self.step = 0
 
