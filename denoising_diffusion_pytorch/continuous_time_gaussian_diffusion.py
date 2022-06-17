@@ -125,7 +125,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         p2_loss_weight_k = 1
     ):
         super().__init__()
-        assert not denoise_fn.sinusoidal_cond_mlp
+        assert denoise_fn.learned_sinusoidal_cond
 
         self.denoise_fn = denoise_fn
 
