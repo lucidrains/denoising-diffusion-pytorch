@@ -314,10 +314,8 @@ class Unet(nn.Module):
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_conv = nn.Sequential(
-            block_klass(dim * 2, dim),
-            nn.Conv2d(dim, self.out_dim, 1)
-        )
+        self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
+        self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     def forward(self, x, time):
         x = self.init_conv(x)
@@ -346,6 +344,8 @@ class Unet(nn.Module):
             x = upsample(x)
 
         x = torch.cat((x, r), dim = 1)
+
+        x = self.final_res_block(x, t)
         return self.final_conv(x)
 
 # gaussian diffusion trainer class
