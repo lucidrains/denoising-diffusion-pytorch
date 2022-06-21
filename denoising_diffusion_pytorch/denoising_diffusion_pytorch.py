@@ -590,7 +590,7 @@ class Trainer(object):
         gradient_accumulate_every = 2,
         amp = False,
         step_start_ema = 2000,
-        update_ema_every = 10,
+        ema_update_every = 10,
         save_and_sample_every = 1000,
         results_folder = './results',
         augment_horizontal_flip = True
@@ -599,8 +599,7 @@ class Trainer(object):
         self.image_size = diffusion_model.image_size
 
         self.model = diffusion_model
-        self.ema = EMA(diffusion_model, beta = ema_decay)
-        self.update_ema_every = update_ema_every
+        self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
 
         self.step_start_ema = step_start_ema
         self.save_and_sample_every = save_and_sample_every
