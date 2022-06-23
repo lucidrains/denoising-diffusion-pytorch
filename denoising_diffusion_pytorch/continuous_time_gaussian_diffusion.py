@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import sqrt
 from torch import nn, einsum
@@ -66,7 +67,7 @@ def beta_linear_log_snr(t):
     return -log(expm1(1e-4 + 10 * (t ** 2)))
 
 def alpha_cosine_log_snr(t, s = 0.008):
-    return -log((torch.cos((t + s) / (1 + s) * torch.pi * 0.5) ** -2) - 1, eps = 1e-5)
+    return -log((torch.cos((t + s) / (1 + s) * math.pi * 0.5) ** -2) - 1, eps = 1e-5)
 
 class learned_noise_schedule(nn.Module):
     """ described in section H and then I.2 of the supplementary material for variational ddpm paper """
