@@ -60,11 +60,14 @@ class Residual(nn.Module):
     def forward(self, x, *args, **kwargs):
         return self.fn(x, *args, **kwargs) + x
 
-def Upsample(dim):
-    return nn.ConvTranspose2d(dim, dim, 4, 2, 1)
+def Upsample(dim, dim_out = None):
+    return nn.Sequential(
+        nn.Upsample(scale_factor = 2, mode = 'nearest'),
+        nn.Conv2d(dim, default(dim_out, dim), 3, padding = 1)
+    )
 
-def Downsample(dim):
-    return nn.Conv2d(dim, dim, 4, 2, 1)
+def Downsample(dim, dim_out = None):
+    return nn.Conv2d(dim, default(dim_out, dim), 4, 2, 1)
 
 class LayerNorm(nn.Module):
     def __init__(self, dim, eps = 1e-5):
@@ -277,10 +280,10 @@ class Unet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                block_klass(dim_in, dim_out, time_emb_dim = time_dim),
-                block_klass(dim_out, dim_out, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
-                Downsample(dim_out) if not is_last else nn.Identity()
+                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
@@ -292,10 +295,10 @@ class Unet(nn.Module):
             is_last = ind == (len(in_out) - 1)
 
             self.ups.append(nn.ModuleList([
-                block_klass(dim_out * 2, dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
-                Upsample(dim_in) if not is_last else nn.Identity()
+                block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
+                Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
 
         default_out_dim = channels * (1 if not learned_variance else 2)
@@ -314,9 +317,12 @@ class Unet(nn.Module):
 
         for block1, block2, attn, downsample in self.downs:
             x = block1(x, t)
+            h.append(x)
+
             x = block2(x, t)
             x = attn(x)
             h.append(x)
+
             x = downsample(x)
 
         x = self.mid_block1(x, t)
@@ -326,8 +332,11 @@ class Unet(nn.Module):
         for block1, block2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
+
+            x = torch.cat((x, h.pop()), dim = 1)
             x = block2(x, t)
             x = attn(x)
+
             x = upsample(x)
 
         x = torch.cat((x, r), dim = 1)
