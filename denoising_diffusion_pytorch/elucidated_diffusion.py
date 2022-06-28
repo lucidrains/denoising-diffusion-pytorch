@@ -1,3 +1,4 @@
+from math import sqrt
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
@@ -90,7 +91,7 @@ class ElucidatedDiffusion(nn.Module):
         return sigma * self.sigma_data * (self.sigma_data ** 2 + sigma ** 2) ** -0.5
 
     def c_in(self, sigma):
-        return (sigma ** 2 + self.sigma_data ** 2) * -0.5
+        return 1 * (sigma ** 2 + self.sigma_data ** 2) ** -0.5
 
     def c_noise(self, sigma):
         """ apparently empirically derived """
@@ -111,21 +112,28 @@ class ElucidatedDiffusion(nn.Module):
     def sample_schedule(self, num_sample_steps = None):
         num_sample_steps = default(num_sample_steps, self.num_sample_steps)
 
-        rho, sigma_max, sigma_min = self.rho, self.sigma_max, self.sigma_min
+        rho, sigma_max, sigma_min, S_tmin, S_tmax, S_churn = self.rho, self.sigma_max, self.sigma_min, self.S_tmin, self.S_tmax, self.S_churn
+        gamma = min(S_churn / num_sample_steps, sqrt(2) - 1)
 
         N = num_sample_steps
         inv_rho = 1 / rho
 
         for i in range(num_sample_steps - 1):
-            next_sigma = (sigma_max ** inv_rho + i / (N - 1) * (sigma_min ** inv_rho - sigma_max ** inv_rho)) ** rho
-            yield next_sigma
+            sigma_i = (sigma_max ** inv_rho + i / (N - 1) * (sigma_min ** inv_rho - sigma_max ** inv_rho)) ** rho
+            gamma_i = gamma if S_tmin <= sigma_i <= S_tmax else 0.
+            yield sigma_i, gamma_i
 
-        yield 0. # last step return 0.
+        yield 0., 0. # last step return 0.
 
     # preconditioned network output
     # equation (7) in the paper
 
     def preconditioned_network_forward(self, noised_images, sigma):
+        batch, device = noised_images.shape[0], noised_images.device
+
+        if isinstance(sigma, float):
+            sigma = torch.ones((batch,), device = device) * sigma
+
         padded_sigma = rearrange(sigma, 'b -> b 1 1 1')
 
         net_out = self.net(
@@ -141,13 +149,40 @@ class ElucidatedDiffusion(nn.Module):
     def sample(self, batch_size = 16):
         shape = (batch_size, self.channels, self.image_size, self.image_size)
 
-        images = torch.randn(shape, device = self.device)
+        # get the schedule, which is returned as (sigma, gamma) tuple, and pair up with the next sigma and gamma
 
         sigma_schedule = [*self.sample_schedule()]
         sigma_schedule = list(zip(sigma_schedule[:-1], sigma_schedule[1:]))
 
-        for sigma, sigma_next in tqdm(sigma_schedule, desc = 'sampling time step'):
-            images = images
+        # function to return noise, given a sigma value
+
+        get_noise = lambda std_dev: (std_dev * torch.randn(shape, device = self.device))
+
+        # images is None, set on first iteration
+
+        images = None
+
+        for (sigma, gamma), (sigma_next, gamma_next) in tqdm(sigma_schedule, desc = 'sampling time step'):
+            if not exists(images):
+                # images start off as the noise based off the first sigma
+                images = get_noise(sigma)
+
+            eps = get_noise(gamma)
+            sigma_hat = sigma + gamma * sigma
+            images_hat = images + sqrt(sigma_hat ** 2 - sigma ** 2) * eps
+
+            model_output = self.preconditioned_network_forward(images_hat, sigma_hat)
+            denoised = (images_hat - model_output) / sigma_hat
+
+            images_next = images_hat + (sigma_next - sigma_hat) * denoised
+
+            if sigma_next != 0:
+                # second order correction
+                model_output_next = self.preconditioned_network_forward(images_next, sigma_next)
+                denoised_prime = (images_next - model_output_next) / sigma_next
+                images_next = images_hat + (sigma_next - sigma_hat) * (0.5 * denoised + 0.5 * denoised_prime)
+
+            images = images_next
 
         return unnormalize_to_zero_to_one(images)
 
