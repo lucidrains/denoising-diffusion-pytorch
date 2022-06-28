@@ -117,25 +117,18 @@ class ElucidatedDiffusion(nn.Module):
     # sampling
 
     @torch.no_grad()
-    def sample_one_timestep(self, x, time, time_next):
-        batch, *_, device = *x.shape, x.device
-        return x
+    def sample(self, batch_size = 16):
+        shape = (batch_size, self.channels, self.image_size, self.image_size)
 
-    @torch.no_grad()
-    def sample_all_timesteps(self, shape):
         images = torch.randn(shape, device = self.device)
         steps = torch.linspace(1., 0., 100 + 1, device = self.device)
 
         for i in tqdm(range(100), desc = 'sampling loop time step', total = 100):
             times = steps[i]
             times_next = steps[i + 1]
-            images = self.sample_one_timestep(images, times, times_next)
+            images = images
 
         return unnormalize_to_zero_to_one(images)
-
-    @torch.no_grad()
-    def sample(self, batch_size = 16):
-        return self.sample_all_timesteps((batch_size, self.channels, self.image_size, self.image_size))
 
     # training
 
