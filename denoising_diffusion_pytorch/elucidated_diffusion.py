@@ -33,7 +33,7 @@ def unnormalize_to_zero_to_one(t):
 class ElucidatedDiffusion(nn.Module):
     def __init__(
         self,
-        denoise_fn,
+        net,
         *,
         image_size,
         channels = 3,
@@ -49,9 +49,9 @@ class ElucidatedDiffusion(nn.Module):
         S_noise = 1.003
     ):
         super().__init__()
-        assert denoise_fn.learned_sinusoidal_cond
+        assert net.learned_sinusoidal_cond
 
-        self.denoise_fn = denoise_fn
+        self.net = net
 
         # image dimensions
 
@@ -76,7 +76,7 @@ class ElucidatedDiffusion(nn.Module):
 
     @property
     def device(self):
-        return next(self.denoise_fn.parameters()).device
+        return next(self.net.parameters()).device
 
     # derived preconditioning params - Table 1
 
@@ -91,7 +91,7 @@ class ElucidatedDiffusion(nn.Module):
 
     def c_noise(self, sigma):
         """ apparently empirically derived """
-        return log(sigma) ** 0.25
+        return log(sigma) * 0.25
 
     # noise distribution
 
@@ -101,7 +101,20 @@ class ElucidatedDiffusion(nn.Module):
     def loss_weight(self, sigma):
         return (sigma ** 2 + self.sigma_data ** 2) * (sigma * self.sigma_data) ** -2
 
-    # sampling related functions
+    # preconditioned network output
+    # equation (7) in the paper
+
+    def preconditioned_network_forward(self, noised_images, sigma):
+        padded_sigma = rearrange(sigma, 'b -> b 1 1 1')
+
+        net_out = self.net(
+            self.c_in(padded_sigma) * noised_images,
+            self.c_noise(sigma)
+        )
+
+        return self.c_skip(padded_sigma) * noised_images +  self.c_out(padded_sigma) * net_out
+
+    # sampling
 
     @torch.no_grad()
     def sample_one_timestep(self, x, time, time_next):
@@ -110,25 +123,21 @@ class ElucidatedDiffusion(nn.Module):
 
     @torch.no_grad()
     def sample_all_timesteps(self, shape):
-        batch = shape[0]
-
-        img = torch.randn(shape, device = self.device)
+        images = torch.randn(shape, device = self.device)
         steps = torch.linspace(1., 0., 100 + 1, device = self.device)
 
         for i in tqdm(range(100), desc = 'sampling loop time step', total = 100):
             times = steps[i]
             times_next = steps[i + 1]
-            img = self.sample_one_timestep(img, times, times_next)
+            images = self.sample_one_timestep(images, times, times_next)
 
-        img.clamp_(-1., 1.)
-        img = unnormalize_to_zero_to_one(img)
-        return img
+        return unnormalize_to_zero_to_one(images)
 
     @torch.no_grad()
     def sample(self, batch_size = 16):
         return self.sample_all_timesteps((batch_size, self.channels, self.image_size, self.image_size))
 
-    # training related functions - noise prediction
+    # training
 
     def add_noise(self, x_start, times, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -140,17 +149,25 @@ class ElucidatedDiffusion(nn.Module):
         return torch.zeros((batch_size,), device = self.device).float().uniform_(0, 1)
 
     def forward(self, images):
-        b, c, h, w, device, image_size, = *images.shape, images.device, self.image_size
-        assert h == image_size and w == image_size, f'height and width of image must be {image_size}'
+        batch_size, c, h, w, device, image_size, channels = *images.shape, images.device, self.image_size, self.channels
 
-        times = self.random_times(b)
+        assert h == image_size and w == image_size, f'height and width of image must be {image_size}'
+        assert c == channels, 'mismatch of image channels'
+
         images = normalize_to_neg_one_to_one(images)
+
+        sigmas = self.noise_distribution(batch_size)
+        padded_sigmas = rearrange(sigmas, 'b -> b 1 1 1')
 
         noise = torch.randn_like(images)
 
-        noise_images, log_snr = self.add_noise(x_start = images, times = times, noise = noise)
-        model_out = self.denoise_fn(noise_images, log_snr)
+        noised_images = images + padded_sigmas * noise  # alphas are 1. in the paper
 
-        losses = F.mse_loss(model_out, noise, reduction = 'none')
+        model_out = self.preconditioned_network_forward(noised_images, sigmas)
+
+        losses = F.mse_loss(model_out, images, reduction = 'none')
         losses = reduce(losses, 'b ... -> b', 'mean')
+
+        losses = losses * self.loss_weight(sigmas)
+
         return losses.mean()
