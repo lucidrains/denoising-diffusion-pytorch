@@ -139,15 +139,6 @@ class ElucidatedDiffusion(nn.Module):
 
     # training
 
-    def add_noise(self, x_start, times, noise = None):
-        noise = default(noise, lambda: torch.randn_like(x_start))
-        x_noised =  x_start + noise
-        return x_noised, noise.mean(dim = (1, 2, 3))
-
-    def random_times(self, batch_size):
-        # times are now uniform from 0 to 1
-        return torch.zeros((batch_size,), device = self.device).float().uniform_(0, 1)
-
     def forward(self, images):
         batch_size, c, h, w, device, image_size, channels = *images.shape, images.device, self.image_size, self.channels
 
