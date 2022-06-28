@@ -116,7 +116,7 @@ class ElucidatedDiffusion(nn.Module):
         N = num_sample_steps
         inv_rho = 1 / rho
 
-        for i in range(num_sample_steps - 1):
+        for i in range(num_sample_steps):
             sigma_i = (sigma_max ** inv_rho + i / (N - 1) * (sigma_min ** inv_rho - sigma_max ** inv_rho)) ** rho
             gamma_i = gamma if S_tmin <= sigma_i <= S_tmax else 0.
             yield sigma_i, gamma_i
