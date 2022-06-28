@@ -94,14 +94,12 @@ class ElucidatedDiffusion(nn.Module):
         return 1 * (sigma ** 2 + self.sigma_data ** 2) ** -0.5
 
     def c_noise(self, sigma):
-        """ apparently empirically derived """
         return log(sigma) * 0.25
 
     # noise distribution
 
     def noise_distribution(self, batch_size):
-        sigmas = (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
-        return sigmas.clamp(min = self.sigma_min, max =self.sigma_max)
+        return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
 
     def loss_weight(self, sigma):
         return (sigma ** 2 + self.sigma_data ** 2) * (sigma * self.sigma_data) ** -2
@@ -184,6 +182,7 @@ class ElucidatedDiffusion(nn.Module):
 
             images = images_next
 
+        images = images.clamp(-1., 1.)
         return unnormalize_to_zero_to_one(images)
 
     # training
@@ -203,9 +202,9 @@ class ElucidatedDiffusion(nn.Module):
 
         noised_images = images + padded_sigmas * noise  # alphas are 1. in the paper
 
-        model_out = self.preconditioned_network_forward(noised_images, sigmas)
+        denoised = self.preconditioned_network_forward(noised_images, sigmas)
 
-        losses = F.mse_loss(model_out, images, reduction = 'none')
+        losses = F.mse_loss(denoised, images, reduction = 'none')
         losses = reduce(losses, 'b ... -> b', 'mean')
 
         losses = losses * self.loss_weight(sigmas)
