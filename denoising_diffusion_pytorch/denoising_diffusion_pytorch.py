@@ -15,11 +15,16 @@ from torch.optim import Adam
 from torchvision import transforms, utils
 from PIL import Image
 
-from tqdm import tqdm
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 
 from ema_pytorch import EMA
+
+import sys
+if 'ipykernel' in sys.modules:
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 
 # helpers functions
 
