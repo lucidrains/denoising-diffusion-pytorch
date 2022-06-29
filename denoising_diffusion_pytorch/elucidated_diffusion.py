@@ -110,18 +110,14 @@ class ElucidatedDiffusion(nn.Module):
     def sample_schedule(self, num_sample_steps = None):
         num_sample_steps = default(num_sample_steps, self.num_sample_steps)
 
-        rho, sigma_max, sigma_min, S_tmin, S_tmax, S_churn = self.rho, self.sigma_max, self.sigma_min, self.S_tmin, self.S_tmax, self.S_churn
-        gamma = min(S_churn / num_sample_steps, sqrt(2) - 1)
-
         N = num_sample_steps
-        inv_rho = 1 / rho
+        inv_rho = 1 / self.rho
 
-        for i in range(num_sample_steps):
-            sigma_i = (sigma_max ** inv_rho + i / (N - 1) * (sigma_min ** inv_rho - sigma_max ** inv_rho)) ** rho
-            gamma_i = gamma if S_tmin <= sigma_i <= S_tmax else 0.
-            yield sigma_i, gamma_i
+        steps = torch.arange(num_sample_steps, device = self.device, dtype = torch.float32)
+        sigmas = (self.sigma_max ** inv_rho + steps / (N - 1) * (self.sigma_min ** inv_rho - self.sigma_max ** inv_rho)) ** self.rho
 
-        yield 0., 0. # last step return 0.
+        sigmas = F.pad(sigmas, (0, 1), value = 0.) # last step is sigma value of 0.
+        return sigmas
 
     # preconditioned network output
     # equation (7) in the paper
@@ -130,7 +126,7 @@ class ElucidatedDiffusion(nn.Module):
         batch, device = noised_images.shape[0], noised_images.device
 
         if isinstance(sigma, float):
-            sigma = torch.ones((batch,), device = device) * sigma
+            sigma = torch.full((batch,), sigma, device = device)
 
         padded_sigma = rearrange(sigma, 'b -> b 1 1 1')
 
@@ -149,36 +145,43 @@ class ElucidatedDiffusion(nn.Module):
 
         # get the schedule, which is returned as (sigma, gamma) tuple, and pair up with the next sigma and gamma
 
-        sigma_schedule = [*self.sample_schedule()]
-        sigma_schedule = list(zip(sigma_schedule[:-1], sigma_schedule[1:]))
+        sigmas = self.sample_schedule()
 
-        # function to return noise, given a sigma value
+        gammas = torch.where(
+            (sigmas >= self.S_tmin) & (sigmas <= self.S_tmax),
+            min(self.S_churn / self.num_sample_steps, sqrt(2) - 1),
+            0.
+        )
 
-        get_noise = lambda std_dev: (std_dev * torch.randn(shape, device = self.device))
+        sigmas_and_gammas = list(zip(sigmas[:-1], sigmas[1:], gammas[:-1]))
 
-        # images is None, set on first iteration
+        # images is noise at the beginning
 
-        images = None
+        init_sigma = sigmas[0]
 
-        for (sigma, gamma), (sigma_next, gamma_next) in tqdm(sigma_schedule, desc = 'sampling time step'):
-            if not exists(images):
-                # images start off as the noise based off the first sigma
-                images = get_noise(sigma)
+        images = init_sigma * torch.randn(shape, device = self.device)
 
-            eps = get_noise(gamma)
+        # gradually denoise
+
+        for sigma, sigma_next, gamma in tqdm(sigmas_and_gammas, desc = 'sampling time step'):
+            sigma, sigma_next, gamma = map(lambda t: t.item(), (sigma, sigma_next, gamma))
+
+            eps = gamma * torch.randn(shape, device = self.device)
+
             sigma_hat = sigma + gamma * sigma
             images_hat = images + sqrt(sigma_hat ** 2 - sigma ** 2) * eps
 
             model_output = self.preconditioned_network_forward(images_hat, sigma_hat)
-            denoised = (images_hat - model_output) / sigma_hat
+            denoised_over_sigma = (images_hat - model_output) / sigma_hat
 
-            images_next = images_hat + (sigma_next - sigma_hat) * denoised
+            images_next = images_hat + (sigma_next - sigma_hat) * denoised_over_sigma
+
+            # second order correction, if not the last timestep
 
             if sigma_next != 0:
-                # second order correction
                 model_output_next = self.preconditioned_network_forward(images_next, sigma_next)
-                denoised_prime = (images_next - model_output_next) / sigma_next
-                images_next = images_hat + (sigma_next - sigma_hat) * (0.5 * denoised + 0.5 * denoised_prime)
+                denoised_prime_over_sigma = (images_next - model_output_next) / sigma_next
+                images_next = images_hat + 0.5 * (sigma_next - sigma_hat) * (denoised_over_sigma + denoised_prime_over_sigma)
 
             images = images_next
 
