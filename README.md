@@ -133,3 +133,13 @@ Samples and model checkpoints will be logged to `./results` periodically
     volume  = {abs/2204.00227}
 }
 ```
+
+```bibtex
+@article{Karras2022ElucidatingTD,
+    title   = {Elucidating the Design Space of Diffusion-Based Generative Models},
+    author  = {Tero Karras and Miika Aittala and Timo Aila and Samuli Laine},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2206.00364}
+}
+```
