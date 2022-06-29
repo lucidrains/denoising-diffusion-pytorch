@@ -96,29 +96,6 @@ class ElucidatedDiffusion(nn.Module):
     def c_noise(self, sigma):
         return log(sigma) * 0.25
 
-    # noise distribution
-
-    def noise_distribution(self, batch_size):
-        return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
-
-    def loss_weight(self, sigma):
-        return (sigma ** 2 + self.sigma_data ** 2) * (sigma * self.sigma_data) ** -2
-
-    # sample schedule
-    # equation (5) in the paper
-
-    def sample_schedule(self, num_sample_steps = None):
-        num_sample_steps = default(num_sample_steps, self.num_sample_steps)
-
-        N = num_sample_steps
-        inv_rho = 1 / self.rho
-
-        steps = torch.arange(num_sample_steps, device = self.device, dtype = torch.float32)
-        sigmas = (self.sigma_max ** inv_rho + steps / (N - 1) * (self.sigma_min ** inv_rho - self.sigma_max ** inv_rho)) ** self.rho
-
-        sigmas = F.pad(sigmas, (0, 1), value = 0.) # last step is sigma value of 0.
-        return sigmas
-
     # preconditioned network output
     # equation (7) in the paper
 
@@ -143,6 +120,21 @@ class ElucidatedDiffusion(nn.Module):
         return out
 
     # sampling
+
+    # sample schedule
+    # equation (5) in the paper
+
+    def sample_schedule(self, num_sample_steps = None):
+        num_sample_steps = default(num_sample_steps, self.num_sample_steps)
+
+        N = num_sample_steps
+        inv_rho = 1 / self.rho
+
+        steps = torch.arange(num_sample_steps, device = self.device, dtype = torch.float32)
+        sigmas = (self.sigma_max ** inv_rho + steps / (N - 1) * (self.sigma_min ** inv_rho - self.sigma_max ** inv_rho)) ** self.rho
+
+        sigmas = F.pad(sigmas, (0, 1), value = 0.) # last step is sigma value of 0.
+        return sigmas
 
     @torch.no_grad()
     def sample(self, batch_size = 16, num_sample_steps = None, clamp = True):
@@ -196,6 +188,12 @@ class ElucidatedDiffusion(nn.Module):
         return unnormalize_to_zero_to_one(images)
 
     # training
+
+    def loss_weight(self, sigma):
+        return (sigma ** 2 + self.sigma_data ** 2) * (sigma * self.sigma_data) ** -2
+
+    def noise_distribution(self, batch_size):
+        return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
 
     def forward(self, images):
         batch_size, c, h, w, device, image_size, channels = *images.shape, images.device, self.image_size, self.channels
