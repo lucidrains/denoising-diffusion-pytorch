@@ -140,16 +140,18 @@ class ElucidatedDiffusion(nn.Module):
     # sampling
 
     @torch.no_grad()
-    def sample(self, batch_size = 16):
+    def sample(self, batch_size = 16, num_sample_steps = None):
+        num_sample_steps = default(num_sample_steps, self.num_sample_steps)
+
         shape = (batch_size, self.channels, self.image_size, self.image_size)
 
         # get the schedule, which is returned as (sigma, gamma) tuple, and pair up with the next sigma and gamma
 
-        sigmas = self.sample_schedule()
+        sigmas = self.sample_schedule(num_sample_steps)
 
         gammas = torch.where(
             (sigmas >= self.S_tmin) & (sigmas <= self.S_tmax),
-            min(self.S_churn / self.num_sample_steps, sqrt(2) - 1),
+            min(self.S_churn / num_sample_steps, sqrt(2) - 1),
             0.
         )
 
