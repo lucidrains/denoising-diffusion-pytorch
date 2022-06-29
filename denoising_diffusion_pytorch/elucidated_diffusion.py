@@ -168,7 +168,7 @@ class ElucidatedDiffusion(nn.Module):
         for sigma, sigma_next, gamma in tqdm(sigmas_and_gammas, desc = 'sampling time step'):
             sigma, sigma_next, gamma = map(lambda t: t.item(), (sigma, sigma_next, gamma))
 
-            eps = gamma * torch.randn(shape, device = self.device)
+            eps = self.S_noise * torch.randn(shape, device = self.device) # stochastic sampling
 
             sigma_hat = sigma + gamma * sigma
             images_hat = images + sqrt(sigma_hat ** 2 - sigma ** 2) * eps
