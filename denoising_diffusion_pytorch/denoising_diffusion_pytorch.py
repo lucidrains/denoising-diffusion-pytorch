@@ -18,13 +18,8 @@ from PIL import Image
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 
+from tqdm.auto import tqdm
 from ema_pytorch import EMA
-
-import sys
-if 'ipykernel' in sys.modules:
-    from tqdm.notebook import tqdm
-else:
-    from tqdm import tqdm
 
 # helpers functions
 
