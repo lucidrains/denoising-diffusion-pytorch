@@ -619,6 +619,7 @@ class Trainer(object):
 
         self.model = diffusion_model
         self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
+        self.model_dpp = None
         if self.is_dpp:
             ddp_kwargs = {'device_ids': [rank], 'output_device': rank, 'find_unused_parameters': True}
             self.model_dpp = DDP(self.model,**ddp_kwargs)
@@ -666,13 +667,13 @@ class Trainer(object):
 
     def train(self):
         with tqdm(initial = self.step, total = self.train_num_steps) as pbar:
-
+            active_model = self.model if not self.is_dpp else self.model_dpp
             while self.step < self.train_num_steps:
                 for i in range(self.gradient_accumulate_every):
                     data = next(self.dl).cuda(self.rank)
 
                     with autocast(enabled = self.amp):
-                        loss = self.model(data)
+                        loss = active_model(data)
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                     pbar.set_description(f'loss: {loss.item():.4f}')
