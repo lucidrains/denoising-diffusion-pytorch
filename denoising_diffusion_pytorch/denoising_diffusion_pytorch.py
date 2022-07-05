@@ -9,7 +9,7 @@ from functools import partial
 from torch.utils import data
 from multiprocessing import cpu_count
 from torch.cuda.amp import autocast, GradScaler
-
+from torch.nn.parallel import DistributedDataParallel as DDP
 from pathlib import Path
 from torch.optim import Adam
 from torchvision import transforms, utils
@@ -30,6 +30,11 @@ def default(val, d):
     if exists(val):
         return val
     return d() if isfunction(d) else d
+
+def convert_image_to(img_type, image):
+    if image.mode != img_type:
+        return image.convert(img_type)
+    return image
 
 def cycle(dl):
     while True:
@@ -568,8 +573,9 @@ class Dataset(data.Dataset):
         self.folder = folder
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
-
+        convert_image_fn = partial(convert_image_to, 'RGB')
         self.transform = transforms.Compose([
+            transforms.Lambda(convert_image_fn),
             transforms.Resize(image_size),
             transforms.RandomHorizontalFlip() if augment_horizontal_flip else nn.Identity(),
             transforms.CenterCrop(image_size),
@@ -602,14 +608,21 @@ class Trainer(object):
         ema_update_every = 10,
         save_and_sample_every = 1000,
         results_folder = './results',
-        augment_horizontal_flip = True
+        augment_horizontal_flip = True,
+        rank = 0,
+        world_size = 1
     ):
         super().__init__()
+        self.is_dpp = world_size > 1
+        self.rank = rank
         self.image_size = diffusion_model.image_size
 
         self.model = diffusion_model
         self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
-
+        if self.is_dpp:
+            ddp_kwargs = {'device_ids': [rank], 'output_device': rank, 'find_unused_parameters': True}
+            self.model_dpp = DDP(self.model,**ddp_kwargs)
+  
         self.step_start_ema = step_start_ema
         self.save_and_sample_every = save_and_sample_every
 
@@ -619,7 +632,10 @@ class Trainer(object):
         self.train_num_steps = train_num_steps
 
         self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip)
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count()))
+        sampler = None
+        if self.is_dpp:
+           sampler = torch.utils.data.distributed.DistributedSampler(self.ds,rank=rank,num_replicas=world_size, shuffle=True)
+        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, sampler = sampler, shuffle = not self.is_dpp, pin_memory = True, num_workers = cpu_count()))
         self.opt = Adam(diffusion_model.parameters(), lr = train_lr)
 
         self.step = 0
@@ -631,13 +647,14 @@ class Trainer(object):
         self.results_folder.mkdir(exist_ok = True)
 
     def save(self, milestone):
-        data = {
-            'step': self.step,
-            'model': self.model.state_dict(),
-            'ema': self.ema.state_dict(),
-            'scaler': self.scaler.state_dict()
-        }
-        torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
+        if self.rank == 0:
+           data = {
+               'step': self.step,
+               'model': self.model.state_dict(),
+               'ema': self.ema.state_dict(),
+               'scaler': self.scaler.state_dict()
+            }
+           torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
 
     def load(self, milestone):
         data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
@@ -652,7 +669,7 @@ class Trainer(object):
 
             while self.step < self.train_num_steps:
                 for i in range(self.gradient_accumulate_every):
-                    data = next(self.dl).cuda()
+                    data = next(self.dl).cuda(self.rank)
 
                     with autocast(enabled = self.amp):
                         loss = self.model(data)
@@ -666,7 +683,7 @@ class Trainer(object):
 
                 self.ema.update()
 
-                if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                if self.step != 0 and self.step % self.save_and_sample_every == 0 and self.rank == 0:
                     self.ema.ema_model.eval()
                     with torch.no_grad():
                         milestone = self.step // self.save_and_sample_every
