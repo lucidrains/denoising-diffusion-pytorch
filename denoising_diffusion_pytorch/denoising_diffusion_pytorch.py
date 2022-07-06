@@ -694,7 +694,7 @@ class Trainer(object):
         self.step = data['step']
         self.ema.load_state_dict(data['ema'])
 
-        if exists(self.accelerator.scaler):
+        if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
 
     def train(self):
