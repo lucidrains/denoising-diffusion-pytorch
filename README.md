@@ -80,6 +80,22 @@ trainer.train()
 
 Samples and model checkpoints will be logged to `./results` periodically
 
+## Multi-GPU Training
+
+The `Trainer` class is now equipped with <a href="https://huggingface.co/docs/accelerate/accelerator">🤗 Accelerator</a>. You can easily do multi-gpu training in two steps using their `accelerate` CLI
+
+At the project root directory, where the training script is, run
+
+```python
+$ accelerate config
+```
+
+Then, in the same directory
+
+```python
+$ accelerate launch train.py
+```
+
 ## Citations
 
 ```bibtex
