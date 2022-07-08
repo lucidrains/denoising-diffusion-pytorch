@@ -22,7 +22,7 @@ def default(val, d):
 
 # tensor helpers
 
-def log(t, eps = 1e-12):
+def log(t, eps = 1e-15):
     return torch.log(t.clamp(min = eps))
 
 def meanflat(x):

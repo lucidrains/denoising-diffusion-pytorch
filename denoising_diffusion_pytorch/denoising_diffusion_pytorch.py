@@ -579,15 +579,18 @@ class Dataset(Dataset):
         folder,
         image_size,
         exts = ['jpg', 'jpeg', 'png', 'tiff'],
-        augment_horizontal_flip = False
+        augment_horizontal_flip = False,
+        convert_image_to = None
     ):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
 
+        maybe_convert_fn = partial(convert_image_to, convert_image_to) if exists(convert_image_to) else nn.Identity()
+
         self.transform = T.Compose([
-            T.Lambda(partial(convert_image_to, 'RGB')),
+            T.Lambda(maybe_convert_fn),
             T.Resize(image_size),
             T.RandomHorizontalFlip() if augment_horizontal_flip else nn.Identity(),
             T.CenterCrop(image_size),
@@ -622,7 +625,8 @@ class Trainer(object):
         results_folder = './results',
         amp = False,
         fp16 = False,
-        split_batches = True
+        split_batches = True,
+        convert_image_to = None
     ):
         super().__init__()
 
@@ -647,7 +651,7 @@ class Trainer(object):
 
         # dataset and dataloader
 
-        self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip)
+        self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
         dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
         self.dl = cycle(dl)
