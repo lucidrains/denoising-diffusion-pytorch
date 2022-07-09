@@ -22,22 +22,23 @@ def default(val, d):
 class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
     def __init__(
         self,
-        denoise_fn,
+        model,
         *args,
         pred_noise_loss_weight = 0.1,
         pred_x_start_loss_weight = 0.1,
         **kwargs
     ):
-        super().__init__(denoise_fn, *args, **kwargs)
-        channels = denoise_fn.channels
-        assert denoise_fn.out_dim == (channels * 2 + 2), 'dimension out (out_dim) of unet must be twice the number of channels + 2 (for the softmax weighted sum) - for channels of 3, this should be (3 * 2) + 2 = 8'
+        super().__init__(model, *args, **kwargs)
+        channels = model.channels
+        assert model.out_dim == (channels * 2 + 2), 'dimension out (out_dim) of unet must be twice the number of channels + 2 (for the softmax weighted sum) - for channels of 3, this should be (3 * 2) + 2 = 8'
+        assert not self.is_ddim_sampling, 'ddim sampling cannot be used'
 
         self.split_dims = (channels, channels, 2)
         self.pred_noise_loss_weight = pred_noise_loss_weight
         self.pred_x_start_loss_weight = pred_x_start_loss_weight
 
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
-        model_output = self.denoise_fn(x, t)
+        model_output = self.model(x, t)
 
         pred_noise, pred_x_start, weights = model_output.split(self.split_dims, dim = 1)
         normalized_weights = weights.softmax(dim = 1)
@@ -58,7 +59,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
-        model_output = self.denoise_fn(x_t, t)
+        model_output = self.model(x_t, t)
         pred_noise, pred_x_start, weights = model_output.split(self.split_dims, dim = 1)
 
         # get loss for predicted noise and x_start
