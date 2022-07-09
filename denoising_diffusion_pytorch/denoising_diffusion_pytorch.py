@@ -680,9 +680,12 @@ class Trainer(object):
         if not self.accelerator.is_main_process:
             return
 
+        opt = self.accelerator.unwrap_model(self.opt)
+
         data = {
             'step': self.step,
             'model': self.accelerator.get_state_dict(self.model),
+            'opt': opt.state_dict(),
             'ema': self.ema.state_dict(),
             'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None
         }
@@ -693,7 +696,10 @@ class Trainer(object):
         data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
 
         model = self.accelerator.unwrap_model(self.model)
+        opt   = self.accelerator.unwrap_model(self.opt)
+
         model.load_state_dict(data['model'])
+        opt.load_state_dict(data['opt'])
 
         self.step = data['step']
         self.ema.load_state_dict(data['ema'])
