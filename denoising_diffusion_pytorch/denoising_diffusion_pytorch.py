@@ -4,6 +4,7 @@ import torch
 from torch import nn, einsum
 import torch.nn.functional as F
 from inspect import isfunction
+from collections import namedtuple
 from functools import partial
 
 from torch.utils.data import Dataset, DataLoader
@@ -21,6 +22,10 @@ from tqdm.auto import tqdm
 from ema_pytorch import EMA
 
 from accelerate import Accelerator
+
+# constants
+
+ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
 
 # helpers functions
 
@@ -383,24 +388,28 @@ def cosine_beta_schedule(timesteps, s = 0.008):
 class GaussianDiffusion(nn.Module):
     def __init__(
         self,
-        denoise_fn,
+        model,
         *,
         image_size,
         channels = 3,
         timesteps = 1000,
+        sampling_timesteps = None,
         loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'cosine',
         p2_loss_weight_gamma = 0., # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time - 1. is recommended
-        p2_loss_weight_k = 1
+        p2_loss_weight_k = 1,
+        ddim_sampling_eta = 1.
     ):
         super().__init__()
-        assert not (type(self) == GaussianDiffusion and denoise_fn.channels != denoise_fn.out_dim)
+        assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
 
         self.channels = channels
         self.image_size = image_size
-        self.denoise_fn = denoise_fn
+        self.model = model
         self.objective = objective
+
+        assert objective in {'pred_noise', 'pred_x0'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start)'
 
         if beta_schedule == 'linear':
             betas = linear_beta_schedule(timesteps)
@@ -416,6 +425,14 @@ class GaussianDiffusion(nn.Module):
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
         self.loss_type = loss_type
+
+        # sampling related parameters
+
+        self.sampling_timesteps = default(sampling_timesteps, timesteps) # default num sampling timesteps to number of timesteps at training
+
+        assert self.sampling_timesteps <= timesteps
+        self.is_ddim_sampling = self.sampling_timesteps < timesteps
+        self.ddim_sampling_eta = ddim_sampling_eta
 
         # helper function to register buffer from float64 to float32
 
@@ -457,6 +474,12 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * noise
         )
 
+    def predict_noise_from_start(self, x_t, t, x0):
+        return (
+            (x0 - extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t) / \
+            extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
+        )
+
     def q_posterior(self, x_start, x_t, t):
         posterior_mean = (
             extract(self.posterior_mean_coef1, t, x_t.shape) * x_start +
@@ -466,15 +489,22 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, x, t, clip_denoised: bool):
-        model_output = self.denoise_fn(x, t)
+    def model_predictions(self, x, t):
+        model_output = self.model(x, t)
 
         if self.objective == 'pred_noise':
-            x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
+            pred_noise = model_output
+            x_start = self.predict_start_from_noise(x, t, model_output)
+
         elif self.objective == 'pred_x0':
+            pred_noise = self.predict_noise_from_start(x, t, model_output)
             x_start = model_output
-        else:
-            raise ValueError(f'unknown objective {self.objective}')
+
+        return ModelPrediction(pred_noise, x_start)
+
+    def p_mean_variance(self, x, t, clip_denoised: bool):
+        preds = self.model_predictions(x, t)
+        x_start = preds.pred_x_start
 
         if clip_denoised:
             x_start.clamp_(-1., 1.)
@@ -483,32 +513,62 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample(self, x, t, clip_denoised=True):
+    def p_sample(self, x, t: int, clip_denoised = True):
         b, *_, device = *x.shape, x.device
-        model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, clip_denoised=clip_denoised)
-        noise = torch.randn_like(x)
-        # no noise when t == 0
-        nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
-        return model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+        batched_times = torch.full((x.shape[0],), t, device = x.device, dtype = torch.long)
+        model_mean, _, model_log_variance = self.p_mean_variance(x = x, t = batched_times, clip_denoised = clip_denoised)
+        noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
+        return model_mean + (0.5 * model_log_variance).exp() * noise
 
     @torch.no_grad()
     def p_sample_loop(self, shape):
-        device = self.betas.device
+        batch, device = shape[0], self.betas.device
 
-        b = shape[0]
         img = torch.randn(shape, device=device)
 
-        for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
+        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step'):
+            img = self.p_sample(img, t)
+
+        img = unnormalize_to_zero_to_one(img)
+        return img
+
+    @torch.no_grad()
+    def ddim_sample(self, shape, clip_denoised = True):
+        batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
+
+        times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
+
+        times = list(reversed(times.int().tolist()))
+        time_pairs = list(zip(times[:-1], times[1:]))
+
+        img = torch.randn(shape, device = device)
+
+        for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
+            alpha = self.alphas_cumprod_prev[time]
+            alpha_next = self.alphas_cumprod_prev[time_next]
+
+            time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
+
+            pred_noise, x_start, *_ = self.model_predictions(img, time_cond)
+
+            if clip_denoised:
+                x_start.clamp_(-1., 1.)
+
+            c1 = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c2 = ((1 - alpha_next) - torch.square(c1)).sqrt()
+
+            img = x_start * alpha_next.sqrt() + \
+                  c1 * torch.randn_like(img) + \
+                  c2 * pred_noise
 
         img = unnormalize_to_zero_to_one(img)
         return img
 
     @torch.no_grad()
     def sample(self, batch_size = 16):
-        image_size = self.image_size
-        channels = self.channels
-        return self.p_sample_loop((batch_size, channels, image_size, image_size))
+        image_size, channels = self.image_size, self.channels
+        sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
+        return sample_fn((batch_size, channels, image_size, image_size))
 
     @torch.no_grad()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
@@ -547,8 +607,8 @@ class GaussianDiffusion(nn.Module):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
 
-        x = self.q_sample(x_start=x_start, t=t, noise=noise)
-        model_out = self.denoise_fn(x, t)
+        x = self.q_sample(x_start = x_start, t = t, noise = noise)
+        model_out = self.model(x, t)
 
         if self.objective == 'pred_noise':
             target = noise
@@ -677,15 +737,13 @@ class Trainer(object):
         self.model, self.dl, self.opt = self.accelerator.prepare(self.model, self.dl, self.opt)
 
     def save(self, milestone):
-        if not self.accelerator.is_main_process:
+        if not self.accelerator.is_local_main_process:
             return
-
-        opt = self.accelerator.unwrap_model(self.opt)
 
         data = {
             'step': self.step,
             'model': self.accelerator.get_state_dict(self.model),
-            'opt': opt.state_dict(),
+            'opt': self.opt.state_dict(),
             'ema': self.ema.state_dict(),
             'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None
         }
@@ -696,12 +754,10 @@ class Trainer(object):
         data = torch.load(str(self.results_folder / f'model-{milestone}.pt'))
 
         model = self.accelerator.unwrap_model(self.model)
-        opt   = self.accelerator.unwrap_model(self.opt)
-
         model.load_state_dict(data['model'])
-        opt.load_state_dict(data['opt'])
 
         self.step = data['step']
+        self.opt.load_state_dict(data['opt'])
         self.ema.load_state_dict(data['ema'])
 
         if exists(self.accelerator.scaler) and exists(data['scaler']):

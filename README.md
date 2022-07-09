@@ -60,8 +60,9 @@ model = Unet(
 diffusion = GaussianDiffusion(
     model,
     image_size = 128,
-    timesteps = 1000,   # number of steps
-    loss_type = 'l1'    # L1 or L2
+    timesteps = 1000,           # number of steps
+    sampling_timesteps = 250,   # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
+    loss_type = 'l1'            # L1 or L2
 ).cuda()
 
 trainer = Trainer(
@@ -157,5 +158,15 @@ $ accelerate launch train.py
     journal = {ArXiv},
     year    = {2022},
     volume  = {abs/2206.00364}
+}
+```
+
+```bibtex
+@article{Song2021DenoisingDI,
+    title   = {Denoising Diffusion Implicit Models},
+    author  = {Jiaming Song and Chenlin Meng and Stefano Ermon},
+    journal = {ArXiv},
+    year    = {2021},
+    volume  = {abs/2010.02502}
 }
 ```

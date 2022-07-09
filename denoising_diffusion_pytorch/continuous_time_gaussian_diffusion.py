@@ -112,7 +112,7 @@ class learned_noise_schedule(nn.Module):
 class ContinuousTimeGaussianDiffusion(nn.Module):
     def __init__(
         self,
-        denoise_fn,
+        model,
         *,
         image_size,
         channels = 3,
@@ -126,9 +126,9 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         p2_loss_weight_k = 1
     ):
         super().__init__()
-        assert denoise_fn.learned_sinusoidal_cond
+        assert model.learned_sinusoidal_cond
 
-        self.denoise_fn = denoise_fn
+        self.model = model
 
         # image dimensions
 
@@ -170,7 +170,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
     @property
     def device(self):
-        return next(self.denoise_fn.parameters()).device
+        return next(self.model.parameters()).device
 
     @property
     def loss_fn(self):
@@ -195,7 +195,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         alpha, sigma, alpha_next = map(sqrt, (squared_alpha, squared_sigma, squared_alpha_next))
 
         batch_log_snr = repeat(log_snr, ' -> b', b = x.shape[0])
-        pred_noise = self.denoise_fn(x, batch_log_snr)
+        pred_noise = self.model(x, batch_log_snr)
 
         if self.clip_sample_denoised:
             x_start = (x - sigma * pred_noise) / alpha
@@ -266,7 +266,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x, log_snr = self.q_sample(x_start = x_start, times = times, noise = noise)
-        model_out = self.denoise_fn(x, log_snr)
+        model_out = self.model(x, log_snr)
 
         losses = self.loss_fn(model_out, noise, reduction = 'none')
         losses = reduce(losses, 'b ... -> b', 'mean')
