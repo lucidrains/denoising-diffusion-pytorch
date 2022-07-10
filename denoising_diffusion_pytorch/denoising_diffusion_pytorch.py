@@ -537,7 +537,6 @@ class GaussianDiffusion(nn.Module):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
-
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:]))
 
@@ -554,12 +553,14 @@ class GaussianDiffusion(nn.Module):
             if clip_denoised:
                 x_start.clamp_(-1., 1.)
 
-            c1 = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
-            c2 = ((1 - alpha_next) - torch.square(c1)).sqrt()
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = ((1 - alpha_next) - sigma ** 2).sqrt()
+
+            noise = torch.randn_like(img) if time_next > 0 else 0.
 
             img = x_start * alpha_next.sqrt() + \
-                  c1 * torch.randn_like(img) + \
-                  c2 * pred_noise
+                  c * pred_noise + \
+                  sigma * noise
 
         img = unnormalize_to_zero_to_one(img)
         return img
