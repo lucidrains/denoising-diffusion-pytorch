@@ -681,6 +681,7 @@ class Trainer(object):
         train_num_steps = 100000,
         ema_update_every = 10,
         ema_decay = 0.995,
+        adam_betas = (0.9, 0.99),
         save_and_sample_every = 1000,
         num_samples = 25,
         results_folder = './results',
@@ -719,7 +720,7 @@ class Trainer(object):
 
         # optimizer
 
-        self.opt = Adam(diffusion_model.parameters(), lr = train_lr)
+        self.opt = Adam(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
 
         # for logging results in a folder periodically
 
@@ -772,14 +773,19 @@ class Trainer(object):
 
             while self.step < self.train_num_steps:
 
+                total_loss = 0.
+
                 for _ in range(self.gradient_accumulate_every):
                     data = next(self.dl).to(device)
 
                     with self.accelerator.autocast():
                         loss = self.model(data)
-                        self.accelerator.backward(loss / self.gradient_accumulate_every)
+                        loss = loss / self.gradient_accumulate_every
+                        total_loss += loss.item()
 
-                pbar.set_description(f'loss: {loss.item():.4f}')
+                    self.accelerator.backward(loss)
+
+                pbar.set_description(f'loss: {total_loss:.4f}')
 
                 accelerator.wait_for_everyone()
 
