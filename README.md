@@ -1,4 +1,4 @@
-<img src="./denoising-diffusion.png" width="500px"></img>
+<img src="./images/denoising-diffusion.png" width="500px"></img>
 
 ## Denoising Diffusion Probabilistic Model, in Pytorch
 
@@ -10,7 +10,7 @@ Youtube AI Educators - <a href="https://www.youtube.com/watch?v=W-O7AZNzbzQ">Yan
 
 <a href="https://huggingface.co/blog/annotated-diffusion">Annotated code</a> by Research Scientists / Engineers from <a href="https://huggingface.co/">🤗 Huggingface</a>
 
-<img src="./sample.png" width="500px"><img>
+<img src="./images/sample.png" width="500px"><img>
 
 [![PyPI version](https://badge.fury.io/py/denoising-diffusion-pytorch.svg)](https://badge.fury.io/py/denoising-diffusion-pytorch)
 
