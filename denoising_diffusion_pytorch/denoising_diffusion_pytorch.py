@@ -479,7 +479,7 @@ class GaussianDiffusion(nn.Module):
 
     def predict_noise_from_start(self, x_t, t, x0):
         return (
-            (x0 - extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t) / \
+            (extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - x0) / \
             extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
         )
 
