@@ -719,6 +719,7 @@ class Trainer(object):
         self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
         dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
+        dl = self.accelerator.prepare(dl)
         self.dl = cycle(dl)
 
         # optimizer
@@ -739,7 +740,7 @@ class Trainer(object):
 
         # prepare model, dataloader, optimizer with accelerator
 
-        self.model, self.dl, self.opt = self.accelerator.prepare(self.model, self.dl, self.opt)
+        self.model, self.opt = self.accelerator.prepare(self.model, self.opt)
 
     def save(self, milestone):
         if not self.accelerator.is_local_main_process:
