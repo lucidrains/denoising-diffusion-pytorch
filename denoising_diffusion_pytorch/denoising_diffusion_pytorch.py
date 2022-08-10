@@ -542,7 +542,7 @@ class GaussianDiffusion(nn.Module):
 
         x_start = None
 
-        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step'):
+        for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', total = self.num_timesteps):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, t, self_cond)
 
@@ -599,11 +599,11 @@ class GaussianDiffusion(nn.Module):
 
         assert x1.shape == x2.shape
 
-        t_batched = torch.stack([torch.tensor(t, device=device)] * b)
-        xt1, xt2 = map(lambda x: self.q_sample(x, t=t_batched), (x1, x2))
+        t_batched = torch.stack([torch.tensor(t, device = device)] * b)
+        xt1, xt2 = map(lambda x: self.q_sample(x, t = t_batched), (x1, x2))
 
         img = (1 - lam) * xt1 + lam * xt2
-        for i in tqdm(reversed(range(0, t)), desc='interpolation sample time step', total=t):
+        for i in tqdm(reversed(range(0, t)), desc = 'interpolation sample time step', total = t):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
 
         return img
