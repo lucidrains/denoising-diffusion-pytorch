@@ -52,6 +52,7 @@ class ElucidatedDiffusion(nn.Module):
     ):
         super().__init__()
         assert net.learned_sinusoidal_cond
+        assert not net.self_condition, 'not supported yet'
 
         self.net = net
 

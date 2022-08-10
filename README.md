@@ -170,3 +170,14 @@ $ accelerate launch train.py
     volume  = {abs/2010.02502}
 }
 ```
+
+```bibtex
+@misc{chen2022analog,
+    title   = {Analog Bits: Generating Discrete Data using Diffusion Models with Self-Conditioning},
+    author  = {Ting Chen and Ruixiang Zhang and Geoffrey Hinton},
+    year    = {2022},
+    eprint  = {2208.04202},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.CV}
+}
+```

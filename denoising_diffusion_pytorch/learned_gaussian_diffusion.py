@@ -77,6 +77,8 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
     ):
         super().__init__(model, *args, **kwargs)
         assert model.out_dim == (model.channels * 2), 'dimension out of unet must be twice the number of channels for learned variance - you can also set the `learned_variance` keyword argument on the Unet to be `True`'
+        assert not model.self_condition, 'not supported yet'
+
         self.vb_loss_weight = vb_loss_weight
 
     def model_predictions(self, x, t):

@@ -31,6 +31,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         super().__init__(model, *args, **kwargs)
         channels = model.channels
         assert model.out_dim == (channels * 2 + 2), 'dimension out (out_dim) of unet must be twice the number of channels + 2 (for the softmax weighted sum) - for channels of 3, this should be (3 * 2) + 2 = 8'
+        assert not model.self_condition, 'not supported yet'
         assert not self.is_ddim_sampling, 'ddim sampling cannot be used'
 
         self.split_dims = (channels, channels, 2)
