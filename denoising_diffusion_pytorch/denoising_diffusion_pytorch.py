@@ -818,9 +818,10 @@ class Trainer(object):
                     with self.accelerator.autocast():
                         loss = self.model(data)
                         loss = loss / self.gradient_accumulate_every
-                        total_loss += loss.item()
+                        total_loss += float(loss.item())
 
                     self.accelerator.backward(loss)
+                    del loss
 
                 pbar.set_description(f'loss: {total_loss:.4f}')
 
@@ -846,6 +847,11 @@ class Trainer(object):
                         all_images = torch.cat(all_images_list, dim = 0)
                         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
                         self.save(milestone)
+
+                        del milestone
+                        del batches
+                        del all_images_list
+                        del all_images
 
                 self.step += 1
                 pbar.update(1)
