@@ -88,6 +88,26 @@ def Upsample(dim, dim_out = None):
 def Downsample(dim, dim_out = None):
     return nn.Conv2d(dim, default(dim_out, dim), 4, 2, 1)
 
+class WeightStandardizedConv2d(nn.Conv2d):
+    """
+    https://arxiv.org/abs/1903.10520
+    weight standardization purportedly works synergistically with group normalization
+    """
+    def forward(self, x):
+        eps = 1e-5 if x.dtype == torch.float32 else 1e-3
+
+        weight = self.weight
+        flattened_weights = rearrange(weight, 'o ... -> o (...)')
+
+        mean = reduce(weight, 'o ... -> o 1 1 1', 'mean')
+
+        var = torch.var(flattened_weights, dim = -1, unbiased = False)
+        var = rearrange(var, 'o -> o 1 1 1')
+
+        weight = (weight - mean) * (var + eps).rsqrt()
+
+        return F.conv2d(x, weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+
 class LayerNorm(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -147,7 +167,7 @@ class LearnedSinusoidalPosEmb(nn.Module):
 class Block(nn.Module):
     def __init__(self, dim, dim_out, groups = 8):
         super().__init__()
-        self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
+        self.proj = WeightStandardizedConv2d(dim, dim_out, 3, padding = 1)
         self.norm = nn.GroupNorm(groups, dim_out)
         self.act = nn.SiLU()
 
@@ -219,7 +239,7 @@ class LinearAttention(nn.Module):
         return self.to_out(out)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 4, dim_head = 32, scale = 16):
+    def __init__(self, dim, heads = 4, dim_head = 32, scale = 10):
         super().__init__()
         self.scale = scale
         self.heads = heads
@@ -236,7 +256,6 @@ class Attention(nn.Module):
 
         sim = einsum('b h d i, b h d j -> b h i j', q, k) * self.scale
         attn = sim.softmax(dim = -1)
-
         out = einsum('b h i j, b h d j -> b h i d', attn, v)
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
         return self.to_out(out)
