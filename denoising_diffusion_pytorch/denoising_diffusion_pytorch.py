@@ -427,6 +427,7 @@ class GaussianDiffusion(nn.Module):
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
+        assert not model.learned_sinusoidal_cond
 
         self.model = model
         self.channels = self.model.channels
@@ -569,15 +570,15 @@ class GaussianDiffusion(nn.Module):
 
         times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
         times = list(reversed(times.int().tolist()))
-        time_pairs = list(zip(times[:-1], times[1:]))
+        time_pairs = list(filter(lambda a: a[0] > a[1], zip(times[:-1], times[1:])))
 
         img = torch.randn(shape, device = device)
 
         x_start = None
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
-            alpha = self.alphas_cumprod_prev[time]
-            alpha_next = self.alphas_cumprod_prev[time_next]
+            alpha = self.alphas_cumprod[time]
+            alpha_next = self.alphas_cumprod[time_next]
 
             time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
 
