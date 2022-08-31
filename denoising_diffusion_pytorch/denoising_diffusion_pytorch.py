@@ -846,6 +846,7 @@ class Trainer(object):
 
                 accelerator.wait_for_everyone()
 
+                self.step += 1
                 if accelerator.is_main_process:
                     self.ema.to(device)
                     self.ema.update()
@@ -862,7 +863,6 @@ class Trainer(object):
                         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
                         self.save(milestone)
 
-                self.step += 1
                 pbar.update(1)
 
         accelerator.print('training complete')
