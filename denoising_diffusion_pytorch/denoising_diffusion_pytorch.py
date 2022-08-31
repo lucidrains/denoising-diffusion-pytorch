@@ -568,36 +568,35 @@ class GaussianDiffusion(nn.Module):
     def ddim_sample(self, shape, clip_denoised = True):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
-        times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
+        times = torch.linspace(0., total_timesteps, steps = sampling_timesteps + 2)[:-1]
         times = list(reversed(times.int().tolist()))
-        time_pairs = list(zip(times[:-1], times[1:]))  # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
+        time_pairs = list(filter(lambda a: a[0] > a[1], zip(times[:-1], times[1:])))
 
         img = torch.randn(shape, device = device)
 
         x_start = None
 
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
-            time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
+            alpha = self.alphas_cumprod[time]
+            alpha_next = self.alphas_cumprod[time_next]
+
+            time_cond = torch.full((batch,), time, device = device, dtype = torch.long)
+
             self_cond = x_start if self.self_condition else None
+
             pred_noise, x_start, *_ = self.model_predictions(img, time_cond, self_cond)
 
             if clip_denoised:
                 x_start.clamp_(-1., 1.)
 
-            if time_next > -1:
-                alpha = self.alphas_cumprod[time]
-                alpha_next = self.alphas_cumprod[time_next]
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = ((1 - alpha_next) - sigma ** 2).sqrt()
 
-                sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
-                c = (1 - alpha_next - sigma ** 2).sqrt()
+            noise = torch.randn_like(img) if time_next > 0 else 0.
 
-                noise = torch.randn_like(img)
-
-                img = x_start * alpha_next.sqrt() + \
-                      c * pred_noise + \
-                      sigma * noise
-            else:
-                img = x_start
+            img = x_start * alpha_next.sqrt() + \
+                  c * pred_noise + \
+                  sigma * noise
 
         img = unnormalize_to_zero_to_one(img)
         return img
