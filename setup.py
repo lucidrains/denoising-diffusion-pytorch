@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
   name = 'denoising-diffusion-pytorch',
   packages = find_packages(),
-  version = '0.27.5',
+  version = '0.27.6',
   license='MIT',
   description = 'Denoising Diffusion Probabilistic Models - Pytorch',
   author = 'Phil Wang',
