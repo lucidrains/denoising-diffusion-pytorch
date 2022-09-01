@@ -37,6 +37,9 @@ def default(val, d):
         return val
     return d() if callable(d) else d
 
+def identity(t, *args, **kwargs):
+    return t
+
 def cycle(dl):
     while True:
         for data in dl:
@@ -517,16 +520,19 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def model_predictions(self, x, t, x_self_cond = None):
+    def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False):
         model_output = self.model(x, t, x_self_cond)
+        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
             pred_noise = model_output
-            x_start = self.predict_start_from_noise(x, t, model_output)
+            x_start = self.predict_start_from_noise(x, t, pred_noise)
+            x_start = maybe_clip(x_start)
 
         elif self.objective == 'pred_x0':
-            pred_noise = self.predict_noise_from_start(x, t, model_output)
             x_start = model_output
+            x_start = maybe_clip(x_start)
+            pred_noise = self.predict_noise_from_start(x, t, x_start)
 
         return ModelPrediction(pred_noise, x_start)
 
@@ -579,10 +585,7 @@ class GaussianDiffusion(nn.Module):
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
             self_cond = x_start if self.self_condition else None
-            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, self_cond)
-
-            if clip_denoised:
-                x_start.clamp_(-1., 1.)
+            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, self_cond, clip_x_start = clip_denoised)
 
             if time_next < 0:
                 img = x_start
