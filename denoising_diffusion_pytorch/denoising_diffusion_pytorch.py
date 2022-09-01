@@ -583,6 +583,7 @@ class GaussianDiffusion(nn.Module):
 
             if clip_denoised:
                 x_start.clamp_(-1., 1.)
+                pred_noise = self.predict_noise_from_start(img, time_cond, x_start)
 
             if time_next < 0:
                 img = x_start
