@@ -450,7 +450,7 @@ class GaussianDiffusion(nn.Module):
             raise ValueError(f'unknown beta schedule {beta_schedule}')
 
         alphas = 1. - betas
-        alphas_cumprod = torch.cumprod(alphas, axis=0)
+        alphas_cumprod = torch.cumprod(alphas, dim=0)
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
         timesteps, = betas.shape
