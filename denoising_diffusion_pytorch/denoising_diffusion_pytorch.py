@@ -56,7 +56,7 @@ def num_to_groups(num, divisor):
         arr.append(remainder)
     return arr
 
-def convert_image_to(img_type, image):
+def convert_image_to_fn(img_type, image):
     if image.mode != img_type:
         return image.convert(img_type)
     return image
@@ -704,7 +704,7 @@ class Dataset(Dataset):
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
 
-        maybe_convert_fn = partial(convert_image_to, convert_image_to) if exists(convert_image_to) else nn.Identity()
+        maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else nn.Identity()
 
         self.transform = T.Compose([
             T.Lambda(maybe_convert_fn),
