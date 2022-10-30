@@ -440,7 +440,7 @@ class GaussianDiffusion(nn.Module):
 
         self.objective = objective
 
-        assert objective in {'pred_noise', 'pred_x0'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start)'
+        assert objective in {'pred_noise', 'pred_x0', 'pred_v'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])'
 
         if beta_schedule == 'linear':
             betas = linear_beta_schedule(timesteps)
@@ -511,6 +511,18 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
         )
 
+    def predict_v(self, x_start, t, noise):
+        return (
+            extract(self.sqrt_alphas_cumprod, t, x_start.shape) * noise -
+            extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * x_start
+        )
+
+    def predict_start_from_v(self, x_t, t, v):
+        return (
+            extract(self.sqrt_alphas_cumprod, t, x_t.shape) * x_t -
+            extract(self.sqrt_one_minus_alphas_cumprod, t, x_t.shape) * v
+        )
+
     def q_posterior(self, x_start, x_t, t):
         posterior_mean = (
             extract(self.posterior_mean_coef1, t, x_t.shape) * x_start +
@@ -531,6 +543,12 @@ class GaussianDiffusion(nn.Module):
 
         elif self.objective == 'pred_x0':
             x_start = model_output
+            x_start = maybe_clip(x_start)
+            pred_noise = self.predict_noise_from_start(x, t, x_start)
+
+        elif self.objective == 'pred_v':
+            v = model_output
+            x_start = self.predict_start_from_v(x, t, v)
             x_start = maybe_clip(x_start)
             pred_noise = self.predict_noise_from_start(x, t, x_start)
 
@@ -671,6 +689,9 @@ class GaussianDiffusion(nn.Module):
             target = noise
         elif self.objective == 'pred_x0':
             target = x_start
+        elif self.objective == 'pred_v':
+            v = self.predict_v(x_start, t, noise)
+            target = v
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
