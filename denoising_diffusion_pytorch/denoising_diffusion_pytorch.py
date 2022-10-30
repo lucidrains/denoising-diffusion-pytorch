@@ -140,15 +140,15 @@ class SinusoidalPosEmb(nn.Module):
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
 
-class LearnedSinusoidalPosEmb(nn.Module):
-    """ following @crowsonkb 's lead with learned sinusoidal pos emb """
+class RandomOrLearnedSinusoidalPosEmb(nn.Module):
+    """ following @crowsonkb 's lead with random (learned optional) sinusoidal pos emb """
     """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
 
-    def __init__(self, dim):
+    def __init__(self, dim, is_random = False):
         super().__init__()
         assert (dim % 2) == 0
         half_dim = dim // 2
-        self.weights = nn.Parameter(torch.randn(half_dim))
+        self.weights = nn.Parameter(torch.randn(half_dim), requires_grad = not is_random)
 
     def forward(self, x):
         x = rearrange(x, 'b -> b 1')
@@ -271,6 +271,7 @@ class Unet(nn.Module):
         resnet_block_groups = 8,
         learned_variance = False,
         learned_sinusoidal_cond = False,
+        random_fourier_features = False,
         learned_sinusoidal_dim = 16
     ):
         super().__init__()
@@ -293,10 +294,10 @@ class Unet(nn.Module):
 
         time_dim = dim * 4
 
-        self.learned_sinusoidal_cond = learned_sinusoidal_cond
+        self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
 
-        if learned_sinusoidal_cond:
-            sinu_pos_emb = LearnedSinusoidalPosEmb(learned_sinusoidal_dim)
+        if self.random_or_learned_sinusoidal_cond:
+            sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
             fourier_dim = learned_sinusoidal_dim + 1
         else:
             sinu_pos_emb = SinusoidalPosEmb(dim)
@@ -429,7 +430,7 @@ class GaussianDiffusion(nn.Module):
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
-        assert not model.learned_sinusoidal_cond
+        assert not model.random_or_learned_sinusoidal_cond
 
         self.model = model
         self.channels = self.model.channels

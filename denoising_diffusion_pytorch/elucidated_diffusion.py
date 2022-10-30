@@ -52,7 +52,7 @@ class ElucidatedDiffusion(nn.Module):
         S_noise = 1.003,
     ):
         super().__init__()
-        assert net.learned_sinusoidal_cond
+        assert net.random_or_learned_sinusoidal_cond
         self.self_condition = net.self_condition
 
         self.net = net

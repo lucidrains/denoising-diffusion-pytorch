@@ -126,7 +126,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         p2_loss_weight_k = 1
     ):
         super().__init__()
-        assert model.learned_sinusoidal_cond
+        assert model.random_or_learned_sinusoidal_cond
         assert not model.self_condition, 'not supported yet'
 
         self.model = model

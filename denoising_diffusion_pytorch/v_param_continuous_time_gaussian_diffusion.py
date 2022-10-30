@@ -61,7 +61,7 @@ class VParamContinuousTimeGaussianDiffusion(nn.Module):
         clip_sample_denoised = True,
     ):
         super().__init__()
-        assert model.learned_sinusoidal_cond
+        assert model.random_or_learned_sinusoidal_cond
         assert not model.self_condition, 'not supported yet'
 
         self.model = model
