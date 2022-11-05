@@ -101,6 +101,39 @@ Then, in the same directory
 $ accelerate launch train.py
 ```
 
+## Miscellaenous
+
+### 1D Sequence
+
+By popular request, a 1D Unet + Gaussian Diffusion implementation. You will have to do the training code yourself
+
+```python
+import torch
+from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D
+
+model = Unet1D(
+    dim = 64,
+    dim_mults = (1, 2, 4, 8),
+    channels = 32
+)
+
+diffusion = GaussianDiffusion1D(
+    model,
+    seq_length = 128,
+    timesteps = 1000,
+    objective = 'pred_v'
+)
+
+training_seq = torch.randn(8, 32, 128) # features are normalized from 0 to 1
+loss = diffusion(training_seq)
+loss.backward()
+
+# after a lot of training
+
+sampled_seq = diffusion.sample(batch_size = 4)
+sampled_seq.shape # (4, 32, 128)
+```
+
 ## Citations
 
 ```bibtex
