@@ -101,7 +101,7 @@ Then, in the same directory
 $ accelerate launch train.py
 ```
 
-## Miscellaenous
+## Miscellaneous
 
 ### 1D Sequence
 
