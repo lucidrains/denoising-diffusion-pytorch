@@ -238,3 +238,13 @@ sampled_seq.shape # (4, 32, 128)
     volume  = {abs/2202.00512}
 }
 ```
+
+```bibtex
+@article{Ho2022ClassifierFreeDG,
+    title   = {Classifier-Free Diffusion Guidance},
+    author  = {Jonathan Ho},
+    journal = {ArXiv},
+    year    = {2022},
+    volume  = {abs/2207.12598}
+}
+```
