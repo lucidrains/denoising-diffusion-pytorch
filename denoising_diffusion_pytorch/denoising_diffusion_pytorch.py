@@ -531,20 +531,20 @@ class GaussianDiffusionBase(nn.Module):
         return pred_img, x_start
 
     @torch.no_grad()
-    def sample(self, batch_size = 16):
+    def sample(self, batch_size = 16, imgs = None):
         image_size, channels = self.image_size, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn((batch_size, channels, image_size, image_size))
+        return sample_fn((batch_size, channels, image_size, image_size), imgs=imgs)
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, img=None):
+    def p_sample_loop(self, shape, imgs = None):
         batch, device = shape[0], self.betas.device
 
         if img is None:
             img = torch.randn(shape, device=device)
         else:
             noise = default(noise, lambda: torch.randn_like(img))
-            img = self.q_sample(img, sampling_timesteps, noise=noise)
+            imgs = self.q_sample(imgs, sampling_timesteps, noise=noise)
 
         x_start = None
 
@@ -772,7 +772,7 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         else:
             raise ValueError(f"Loss function of typ {self.loss_type} is not supported")
 
-    def p_losses(self, x_start, t, b_start, noise=None):
+    def p_losses(self, x_start, b_start, t, noise=None):
         if x_start.shape != b_start.shape:
             raise ValueError("The dimensionality of the image and the segmentation maps must be the same")
 
@@ -802,6 +802,16 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         loss = loss * extract(self.p2_loss_weight, t, loss.shape)
         return loss.mean()
 
+    def forward(self, sample_pair, *args, **kwargs):
+        img, segmentation = sample_pair
+        b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
+        _, _, h_segm, w_segm = segmentation.shape
+        assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
+        assert h == h_segm and w == w_segm, f"the images and their segmentation must be the same size: {img_size}"
+        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+
+        img = normalize_to_neg_one_to_one(img)
+        return self.p_losses(img, segmentation, t, *args, **kwargs)
 
 class Dataset(data.Dataset):
     def __init__(
@@ -840,6 +850,7 @@ class DatasetSegmentation(Dataset):
     def __init__(
         self,
         images_folder,
+        segmentations_folder,
         *args,
         **kwargs
     ):
@@ -860,12 +871,12 @@ class DatasetSegmentation(Dataset):
 
 
 # trainer class
-class Trainer(object):
+class TrainerBase():
     def __init__(
         self,
         diffusion_model,
-        folder,
         *,
+        segmentation_folder = None,
         train_batch_size = 16,
         gradient_accumulate_every = 1,
         augment_horizontal_flip = True,
@@ -903,32 +914,47 @@ class Trainer(object):
         self.train_num_steps = train_num_steps
         self.image_size = diffusion_model.image_size
 
-        # dataset and dataloader
+        self.train_lr = train_lr
+        self.adam_betas = adam_betas
 
-        self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
-        dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
+        self.ema_decay = ema_decay
+        self.ema_update_every = ema_update_every
+
+        self.augment_horizontal_flip = augment_horizontal_flip
+        self.convert_image_to = convert_image_to
+        
+        self.results_folder = Path(results_folder)
+
+    @property
+    def IS_SEGMENTATION_TRAINER(self):
+        pass
+
+    # dataset and dataloader
+    @property
+    def ds(self):
+        return self._ds
+    
+    @ds.setter
+    def ds(self, ds):
+        self._ds = ds
+        dl = DataLoader(self.ds, batch_size=self.batch_size, shuffle=True, pin_memory=True, num_workers=cpu_count())
 
         dl = self.accelerator.prepare(dl)
         self.dl = cycle(dl)
 
         # optimizer
 
-        self.opt = Adam(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
+        self.opt = Adam(self.model.parameters(), lr=self.train_lr, betas=self.adam_betas)
 
         # for logging results in a folder periodically
-
         if self.accelerator.is_main_process:
-            self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
-
-            self.results_folder = Path(results_folder)
-            self.results_folder.mkdir(exist_ok = True)
+            self.ema = EMA(self.model, beta=self.ema_decay, update_every=self.ema_update_every)
+            self.results_folder.mkdir(exist_ok=True)
 
         # step counter state
-
         self.step = 0
 
         # prepare model, dataloader, optimizer with accelerator
-
         self.model, self.opt = self.accelerator.prepare(self.model, self.opt)
 
     def save(self, milestone):
@@ -961,14 +987,13 @@ class Trainer(object):
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
 
-    def train(self):
+     def train(self)
         accelerator = self.accelerator
         device = accelerator.device
+        data = None
 
         with tqdm(initial = self.step, total = self.train_num_steps, disable = not accelerator.is_main_process) as pbar:
-
             while self.step < self.train_num_steps:
-
                 total_loss = 0.
 
                 for _ in range(self.gradient_accumulate_every):
@@ -1002,7 +1027,10 @@ class Trainer(object):
                         with torch.no_grad():
                             milestone = self.step // self.save_and_sample_every
                             batches = num_to_groups(self.num_samples, self.batch_size)
-                            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
+                            sample_img = None
+                            if self.IS_SEGMENTATION_TRAINER:
+                                sample_img, _ = data
+                            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=sample_image), batches))
 
                         all_images = torch.cat(all_images_list, dim = 0)
                         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
@@ -1011,3 +1039,45 @@ class Trainer(object):
                 pbar.update(1)
 
         accelerator.print('training complete')
+
+
+class Trainer(TrainerBase):
+    IS_SEGMENTATION_TRAINER = False
+
+    def __init__(
+        self,
+        diffusion_model,
+        folder,
+        *,
+        *args,
+        **kwargs
+    ):
+        super().__init__(diffusion_model, *args, **kwargs)
+        self.ds = Dataset(
+            folder,
+            self.image_size,
+            augment_horizontal_flip=augment_horizontal_flip,
+            convert_image_to=convert_image_to
+        )
+
+
+class TrainerSegmentation(TrainerBase):
+    IS_SEGMENTATION_TRAINER = True
+
+    def __init__(
+        self,
+        diffusion_model,
+        images_folder,
+        segmentations_folder,
+        *,
+        *args,
+        **kwargs
+    ):
+        super().__init__(diffusion_model, *args, **kwargs)
+        self.ds = DatasetSegmentation(
+            images_folder=images_folder,
+            segmentations_folder=segmentations_folder,
+            image_size=self.image_size,
+            augment_horizontal_flip=augment_horizontal_flip,
+            convert_image_to=convert_image_to
+        )
