@@ -1,5 +1,5 @@
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch import (
-    GaussianDiffusion, GaussianDiffusionSegmentationMapping, Unet, Trainer)
+    GaussianDiffusion, GaussianDiffusionSegmentationMapping, Unet, Trainer, TrainerSegmentation)
 
 from denoising_diffusion_pytorch.learned_gaussian_diffusion import LearnedGaussianDiffusion
 from denoising_diffusion_pytorch.continuous_time_gaussian_diffusion import ContinuousTimeGaussianDiffusion
