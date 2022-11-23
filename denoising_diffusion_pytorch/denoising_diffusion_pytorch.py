@@ -801,7 +801,7 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         return loss.mean()
 
     def forward(self, sample_pair, *args, **kwargs):
-        img, segmentation = sample_pair
+        img, segmentation = torch.unbind(sample_pair, dim=1)
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         _, _, h_segm, w_segm = segmentation.shape
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
