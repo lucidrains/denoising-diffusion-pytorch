@@ -18,6 +18,8 @@ setup(
     'accelerate',
     'einops',
     'ema-pytorch',
+    'importlib_metadata',
+    'packaging',
     'pillow',
     'torch',
     'torchvision',

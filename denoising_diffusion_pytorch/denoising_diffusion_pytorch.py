@@ -9,7 +9,8 @@ from multiprocessing import cpu_count
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+import torch.utils.data as data
+from torch.utils.data import DataLoader
 
 from torch.optim import Adam
 from torchvision import transforms as T, utils
@@ -752,7 +753,7 @@ class GaussianDiffusion(GaussianDiffusionBase):
         return self.p_losses(img, t, *args, **kwargs)
 
 
-class GaussianDiffusionSegmentationMapping(GaussianDiffusionAbstractClass):
+class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
     def __init__(
         self,
         model,
@@ -795,14 +796,14 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionAbstractClass):
 
         positive, negative = self.q_sample(x_start=b_start, t=t, noise=noise), x if self.is_loss_time_dependent \
             else b_start, x_start
-        loss = self.loss_fn(anchor=model_out, positive=b_start, negative=x_start, margin=self.margin)
+        loss = self.loss_fn(anchor=model_out, positive=positive, negative=negative, margin=self.margin)
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.p2_loss_weight, t, loss.shape)
         return loss.mean()
 
 
-class Dataset(Dataset):
+class Dataset(data.Dataset):
     def __init__(
         self,
         folder,
@@ -839,36 +840,26 @@ class DatasetSegmentation(Dataset):
     def __init__(
         self,
         images_folder,
-        segmentations_folder,
-        image_size,
-        exts = ['jpg', 'jpeg', 'png', 'tiff'],
-        augment_horizontal_flip = False,
-        convert_image_to = None
+        *args,
+        **kwargs
     ):
-        super().__init__()
-        self.folder = folder
-        self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+        super().__init__(images_folder, *args, **kwargs)
+        self.images_folder = images_folder
+        self.segmentations_folder = segmentations_folder
 
-        maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else nn.Identity()
-
-        self.transform = T.Compose([
-            T.Lambda(maybe_convert_fn),
-            T.Resize(image_size),
-            T.RandomHorizontalFlip() if augment_horizontal_flip else nn.Identity(),
-            T.CenterCrop(image_size),
-            T.ToTensor()
-        ])
-
-    def __len__(self):
-        return len(self.paths)
+        self.paths = [
+            (path_img, Path(segmentations_folder) / Path(path_img).name
+            for path_img in self.paths if (Path(segmentations_folder) / Path(path_img).name).exists()
+        ]
 
     def __getitem__(self, index):
-        path = self.paths[index]
-        img = Image.open(path)
-        return self.transform(img)
-# trainer class
+        img_path, segm_path = self.paths[index]
+        img = Image.open(img_path)
+        segm = Image.open(segm_path)
+        return self.transform(img), self.transform(segm)
 
+
+# trainer class
 class Trainer(object):
     def __init__(
         self,
