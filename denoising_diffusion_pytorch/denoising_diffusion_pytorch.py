@@ -9,7 +9,7 @@ from multiprocessing import cpu_count
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
-import torch.utils.data as data
+import torch.utils.data as torch_data
 from torch.utils.data import DataLoader
 
 from torch.optim import Adam
@@ -813,7 +813,7 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, segmentation, t, *args, **kwargs)
 
-class Dataset(data.Dataset):
+class Dataset(torch_data.Dataset):
     def __init__(
         self,
         folder,
