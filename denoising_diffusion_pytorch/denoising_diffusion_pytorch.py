@@ -10,7 +10,7 @@ import torch
 from torch import nn, einsum
 import torch.nn.functional as F
 import torch.utils.data as torch_data
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 from torch.optim import Adam
 from torchvision import transforms as T, utils
@@ -890,7 +890,6 @@ class TrainerBase():
         ema_update_every = 10,
         ema_decay = 0.995,
         adam_betas = (0.9, 0.99),
-        save_and_sample_every = 1000,
         num_samples = 25,
         results_folder = './results',
         amp = False,
@@ -911,7 +910,6 @@ class TrainerBase():
 
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
-        self.save_and_sample_every = save_and_sample_every
 
         self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
@@ -1048,10 +1046,12 @@ class Trainer(TrainerBase):
         self,
         diffusion_model,
         folder,
+        save_and_sample_every = 1000,
         *args,
         **kwargs
     ):
         super().__init__(diffusion_model, *args, **kwargs)
+        self.save_and_sample_every = save_and_sample_every
         self.ds = Dataset(
             folder,
             self.image_size,
@@ -1080,12 +1080,14 @@ class TrainerSegmentation(TrainerBase):
         diffusion_model,
         images_folder,
         segmentations_folder,
+        validate_every = 1000,
         data_split = (0.8, 0.1, 0.1),
         seed = 42,
         *args,
         **kwargs
     ):
         super().__init__(diffusion_model, *args, **kwargs)
+        self.validate_every = validate_every
         dataset = DatasetSegmentation(
             images_folder=images_folder,
             segmentations_folder=segmentations_folder,
