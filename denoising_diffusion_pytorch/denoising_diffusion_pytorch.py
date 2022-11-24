@@ -1025,7 +1025,7 @@ class TrainerBase():
                 if accelerator.is_main_process:
                     self.ema.to(device)
                     self.ema.update()
-                    self.validate_or_sample(milestone, device)
+                    self.validate_or_sample(milestone)
 
                     if self.step != 0 and self.step % self.save_every == 0:
                         milestone = self.step // self.save_and_sample_every
@@ -1060,7 +1060,7 @@ class Trainer(TrainerBase):
         )
 
     @torch.no_grad()
-    def validate_or_sample(self, milestone, device):
+    def validate_or_sample(self, milestone):
         if self.step != 0 and self.step % self.save_and_sample_every == 0:
             self.ema.ema_model.eval()
             batches = num_to_groups(self.num_samples, self.batch_size)
@@ -1088,6 +1088,7 @@ class TrainerSegmentation(TrainerBase):
     ):
         super().__init__(diffusion_model, *args, **kwargs)
         self.validate_every = validate_every
+
         dataset = DatasetSegmentation(
             images_folder=images_folder,
             segmentations_folder=segmentations_folder,
@@ -1095,6 +1096,7 @@ class TrainerSegmentation(TrainerBase):
             augment_horizontal_flip=self.augment_horizontal_flip,
             convert_image_to=self.convert_image_to
         )
+
         generator = torch.Generator().manual_seed(seed)
         self.ds, self.valid_ds, self.test_ds = random_split(
             dataset,
@@ -1112,9 +1114,13 @@ class TrainerSegmentation(TrainerBase):
         self.valid_dl = cycle(valid_dl)
 
     @torch.no_grad()
-    def validate_or_sample(self, milestone, device):
+    def validate_or_sample(self, milestone):
         if self.step != 0 and self.step % self.validate_every == 0:
+            accelerator.print(f"Validation step {self.step}")
+
             self.ema.ema_model.eval()
+            device = self.accelerator.device
+
             validation_set_length = len(self.valid_ds)
 
             for _ in range(validation_set_length):
@@ -1137,3 +1143,4 @@ class TrainerSegmentation(TrainerBase):
                         segmenation,
                         self.results_folder / f"generated/sample_{milestone}_{ind}.png")    
 
+            pbar.set_description(f'loss: {total_loss:.4f}')
