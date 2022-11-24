@@ -1071,7 +1071,7 @@ class Trainer(TrainerBase):
 
             for ind, sample in enumerate(all_images_list):
                 utils.save_image(
-                    image,
+                    sample,
                     self.results_folder / f"generated/sample_{milestone}_{ind}.png")       
 
 
