@@ -1067,7 +1067,7 @@ class Trainer(TrainerBase):
 
             self.ema.ema_model.eval()
             batches = num_to_groups(self.num_samples, self.batch_size)
-            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=sample_image), batches))
+            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
 
             for ind, sample in all_images_list:
                 utils.save_image(
