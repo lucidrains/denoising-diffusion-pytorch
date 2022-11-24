@@ -756,12 +756,14 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         image_size,
         margin = 0.0,
         loss_type = "triplet",
+        is_loss_time_dependent = False,
         *args,
         **kwargs
     ):
         super().__init__(model, image_size, *args, **kwargs)
         self.loss_type = loss_type
         self.margin = margin
+        self.is_loss_time_dependent = is_loss_time_dependent
 
     @property
     def loss_fn(self):
