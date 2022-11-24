@@ -794,8 +794,8 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         # predict and take gradient step
         model_out = self.model(x, t, x_self_cond)
 
-        positive, negative = self.q_sample(x_start=b_start, t=t, noise=noise), x if self.is_loss_time_dependent \
-            else b_start, x_start
+        positive, negative = (self.q_sample(x_start=b_start, t=t, noise=noise), x) if self.is_loss_time_dependent \
+            else (b_start, x_start)
         loss = self.loss_fn(anchor=model_out, positive=positive, negative=negative, margin=self.margin)
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
