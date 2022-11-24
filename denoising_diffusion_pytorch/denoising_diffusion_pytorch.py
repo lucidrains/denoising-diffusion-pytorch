@@ -1093,7 +1093,7 @@ class TrainerSegmentation(TrainerBase):
             augment_horizontal_flip=self.augment_horizontal_flip,
             convert_image_to=self.convert_image_to
         )
-        generator=torch.Generator().manual_seed(seed))
+        generator = torch.Generator().manual_seed(seed)
         self.ds, self.valid_ds, self.test_ds = random_split(
             dataset,
             lengths=list(data_split),
