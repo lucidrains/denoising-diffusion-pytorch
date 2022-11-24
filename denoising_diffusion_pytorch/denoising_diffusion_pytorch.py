@@ -1027,32 +1027,19 @@ class TrainerBase():
                 if accelerator.is_main_process:
                     self.ema.to(device)
                     self.ema.update()
+                    self.validate_or_sample(milestone, device)
 
-                    if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                        self.ema.ema_model.eval()
-
-                        with torch.no_grad():
-                            milestone = self.step // self.save_and_sample_every
-                            batches = num_to_groups(self.num_samples, self.batch_size)
-                            sample_img = None
-                            if self.IS_SEGMENTATION_TRAINER:
-                                sample_img, _ = data
-                            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=sample_image), batches))
-
-                        for ind, (image, segmentation) in enumerate(zip(sample_image, all_images_list)):
-                            utils.save_image(
-                                image,
-                                self.results_folder / f"generated/sample_{milestone}_{ind}.png")
-                            utils.save_image(
-                                image,
-                                self.results_folder / f"ground_truth/sample_{milestone}_{ind}.png")
-
+                    if self.step != 0 and self.step % self.save_every == 0:
+                        milestone = self.step // self.save_and_sample_every
                         self.save(milestone)
 
                 pbar.update(1)
 
         accelerator.print('training complete')
 
+    @torch.no_grad()
+    def validate_or_sample(self, milestone, device):
+        pass
 
 class Trainer(TrainerBase):
     IS_SEGMENTATION_TRAINER = False
@@ -1072,6 +1059,18 @@ class Trainer(TrainerBase):
             convert_image_to=self.convert_image_to
         )
 
+    @torch.no_grad()
+    def validate_or_sample(self, milestone, device):
+        if self.step != 0 and self.step % self.save_and_sample_every == 0:
+            self.ema.ema_model.eval()
+            batches = num_to_groups(self.num_samples, self.batch_size)
+            all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=sample_image), batches))
+
+            for ind, sample in all_images_list:
+                utils.save_image(
+                    image,
+                    self.results_folder / f"generated/sample_{milestone}_{ind}.png")       
+
 
 class TrainerSegmentation(TrainerBase):
     IS_SEGMENTATION_TRAINER = True
@@ -1081,14 +1080,58 @@ class TrainerSegmentation(TrainerBase):
         diffusion_model,
         images_folder,
         segmentations_folder,
+        data_split = (0.8, 0.1, 0.1),
+        seed = 42,
         *args,
         **kwargs
     ):
         super().__init__(diffusion_model, *args, **kwargs)
-        self.ds = DatasetSegmentation(
+        dataset = DatasetSegmentation(
             images_folder=images_folder,
             segmentations_folder=segmentations_folder,
             image_size=self.image_size,
             augment_horizontal_flip=self.augment_horizontal_flip,
             convert_image_to=self.convert_image_to
         )
+        generator=torch.Generator().manual_seed(seed))
+        self.ds, self.valid_ds, self.test_ds = random_split(
+            dataset,
+            lengths=list(data_split),
+            generator=generator
+        )
+        valid_dl = DataLoader(
+            self.valid_ds,
+            batch_size=self.batch_size,
+            shuffle=True,
+            pin_memory=True,
+            num_workers=cpu_count())
+
+        valid_dl = self.accelerator.prepare(valid_dl)
+        self.valid_dl = cycle(valid_dl)
+
+    @torch.no_grad()
+    def validate_or_sample(self, milestone, device):
+        if self.step != 0 and self.step % self.validate_every == 0:
+            self.ema.ema_model.eval()
+            validation_set_length = len(self.valid_ds)
+
+            for _ in range(validation_set_length):
+                data = next(self.valid_dl).to(device)
+
+                loss = self.model(data)
+                loss = loss / validation_set_length
+                total_loss += loss.item()
+
+                imgs, _ = torch.unbind(data, dim=1)
+                batches = num_to_groups(self.num_samples, self.batch_size)
+                pred_segmentations = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=imgs), batches))
+                print(type(pred_segmentations))
+
+                for image, segmentation in pred_segmentations:
+                    utils.save_image(
+                        image,
+                        self.results_folder / f"ground_truths/sample_{milestone}_{ind}.png")    
+                    utils.save_image(
+                        segmenation,
+                        self.results_folder / f"generated/sample_{milestone}_{ind}.png")    
+
