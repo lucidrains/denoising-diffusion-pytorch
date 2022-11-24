@@ -767,10 +767,10 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
 
     @property
     def loss_fn(self):
-        if self.loss_type == "triple":
+        if self.loss_type == "triplet":
             return F1.triplet_margin_loss
         else:
-            raise ValueError(f"Loss function of typ {self.loss_type} is not supported")
+            raise ValueError(f"Loss function of type {self.loss_type} is not supported")
 
     def p_losses(self, x_start, b_start, t, noise=None):
         if x_start.shape != b_start.shape:
