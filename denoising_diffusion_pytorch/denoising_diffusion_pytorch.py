@@ -1069,7 +1069,7 @@ class Trainer(TrainerBase):
             batches = num_to_groups(self.num_samples, self.batch_size)
             all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
 
-            for ind, sample in all_images_list:
+            for ind, sample in enumerate(all_images_list):
                 utils.save_image(
                     image,
                     self.results_folder / f"generated/sample_{milestone}_{ind}.png")       
@@ -1141,7 +1141,7 @@ class TrainerSegmentation(TrainerBase):
                 pred_segmentations = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=imgs), batches))
                 print(type(pred_segmentations))
 
-                for image, segmentation in pred_segmentations:
+                for ind, (image, segmentation) in enumerate(pred_segmentations):
                     utils.save_image(
                         image,
                         self.results_folder / f"ground_truths/sample_{milestone}_{ind}.png")    
