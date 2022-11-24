@@ -1065,8 +1065,8 @@ class Trainer(TrainerBase):
         self.ds = Dataset(
             folder,
             self.image_size,
-            augment_horizontal_flip=augment_horizontal_flip,
-            convert_image_to=convert_image_to
+            augment_horizontal_flip=self.augment_horizontal_flip,
+            convert_image_to=self.convert_image_to
         )
 
 
