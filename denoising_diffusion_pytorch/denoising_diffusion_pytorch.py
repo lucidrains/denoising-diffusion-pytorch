@@ -1012,7 +1012,7 @@ class TrainerBase():
                     self.accelerator.backward(loss)
 
                 accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
-                pbar.set_description(f'loss: {total_loss:.4f}')
+                pbar.set_description(f'Training loss: {total_loss:.4f}')
 
                 accelerator.wait_for_everyone()
 
@@ -1025,15 +1025,15 @@ class TrainerBase():
                 if accelerator.is_main_process:
                     self.ema.to(device)
                     self.ema.update()
-                    self.validate_or_sample(milestone)
+                    self.validate_or_sample()
 
                     if self.step != 0 and self.step % self.save_every == 0:
-                        milestone = self.step // self.save_and_sample_every
+                        milestone = self.step // self.save_every
                         self.save(milestone)
 
                 pbar.update(1)
 
-        accelerator.print('training complete')
+        accelerator.print('Training complete!')
 
     @torch.no_grad()
     def validate_or_sample(self, milestone, device):
@@ -1051,7 +1051,8 @@ class Trainer(TrainerBase):
         **kwargs
     ):
         super().__init__(diffusion_model, *args, **kwargs)
-        self.save_and_sample_every = save_and_sample_every
+        self.sample_every = save_and_sample_every
+        self.save_every = save_and_sample_every
         self.ds = Dataset(
             folder,
             self.image_size,
@@ -1060,8 +1061,10 @@ class Trainer(TrainerBase):
         )
 
     @torch.no_grad()
-    def validate_or_sample(self, milestone):
-        if self.step != 0 and self.step % self.save_and_sample_every == 0:
+    def validate_or_sample(self):
+        if self.step != 0 and self.step % self.sample_every == 0:
+            milestone = self.step // self.sample_every
+
             self.ema.ema_model.eval()
             batches = num_to_groups(self.num_samples, self.batch_size)
             all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=sample_image), batches))
@@ -1088,6 +1091,7 @@ class TrainerSegmentation(TrainerBase):
     ):
         super().__init__(diffusion_model, *args, **kwargs)
         self.validate_every = validate_every
+        self.save_every = validate_every
 
         dataset = DatasetSegmentation(
             images_folder=images_folder,
@@ -1114,9 +1118,11 @@ class TrainerSegmentation(TrainerBase):
         self.valid_dl = cycle(valid_dl)
 
     @torch.no_grad()
-    def validate_or_sample(self, milestone):
+    def validate_or_sample(self):
         if self.step != 0 and self.step % self.validate_every == 0:
             accelerator.print(f"Validation step {self.step}")
+
+            milestone = self.step // self.validate_every
 
             self.ema.ema_model.eval()
             device = self.accelerator.device
@@ -1143,4 +1149,4 @@ class TrainerSegmentation(TrainerBase):
                         segmenation,
                         self.results_folder / f"generated/sample_{milestone}_{ind}.png")    
 
-            pbar.set_description(f'loss: {total_loss:.4f}')
+            pbar.set_description(f'Validation loss: {total_loss:.4f}')
