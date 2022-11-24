@@ -796,7 +796,9 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
 
         positive, negative = (self.q_sample(x_start=b_start, t=t, noise=noise), x) if self.is_loss_time_dependent \
             else (b_start, x_start)
-        loss = self.loss_fn(anchor=model_out, positive=positive, negative=negative, margin=self.margin)
+        loss = self.loss_fn(anchor=model_out, positive=positive, negative=negative,
+                            margin=self.margin,
+                            reduction='none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.p2_loss_weight, t, loss.shape)
