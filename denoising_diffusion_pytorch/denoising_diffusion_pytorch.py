@@ -1244,7 +1244,8 @@ class TrainerSegmentation(TrainerBase):
         pred_segmentations = self.ema.ema_model.sample(batch_size=batch.shape[0], imgs=batch)
         imgs_list = list(torch.unbind(batch))
         segm_list = list(torch.unbind(pred_segmentations))
-        gt_list = list(torch.unbind(ground_truth_segmentation)) if ground_truth_segmentation else [None] * len(imgs_list)
+        gt_list = list(torch.unbind(ground_truth_segmentation)) if ground_truth_segmentation is not None \
+            else [None] * len(imgs_list)
 
         eval_results = DataFrame()
         for ind, (image, segmentation, ground_truth) in enumerate(zip(imgs_list, segm_list, gt_list)):
