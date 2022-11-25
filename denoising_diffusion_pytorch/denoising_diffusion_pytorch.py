@@ -819,7 +819,7 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
     def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False):
         model_output = self.model(x, t, x_self_cond)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
-        x_start = self.predict_start_from_noise(x, t, pred_noise)
+        x_start = self.predict_start_from_noise(x, t, model_output)
 
         return ModelPrediction(model_output, maybe_clip(x))
 
