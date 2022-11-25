@@ -49,6 +49,14 @@ def cycle(dl):
 def has_int_squareroot(num):
     return (math.sqrt(num) ** 2) == num
 
+def split_int_in_propotions(num, split):
+    lengths = [round(prop * num) for prop in split]
+    remainder = num - sum(lengths)
+    while remainder > 0:
+        lengths[ind % len(split)] += 1
+        ind += 1
+        remainder -= 1
+
 def num_to_groups(num, divisor):
     groups = num // divisor
     remainder = num % divisor
@@ -1104,7 +1112,7 @@ class TrainerSegmentation(TrainerBase):
         generator = torch.Generator().manual_seed(seed)
         self.ds, self.valid_ds, self.test_ds = random_split(
             dataset,
-            lengths=list(data_split),
+            lengths=split_int_in_propotions(len(dataset), data_split),
             generator=generator
         )
         valid_dl = DataLoader(
