@@ -542,7 +542,7 @@ class GaussianDiffusionBase(nn.Module):
         return sample_fn((batch_size, channels, image_size, image_size), img=imgs)
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, imgs = None):
+    def p_sample_loop(self, shape, imgs = None, noise = None):
         batch, device = shape[0], self.betas.device
 
         if img is None:
