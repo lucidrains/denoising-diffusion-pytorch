@@ -1157,7 +1157,7 @@ class TrainerSegmentation(TrainerBase):
                 total_loss += loss.item()
 
                 imgs, _ = torch.unbind(data, dim=1)
-                pred_segmentations = self.ema.ema_model.sample(batch_size=self.batch_size, imgs=imgs)
+                pred_segmentations = self.ema.ema_model.sample(batch_size=imgs.shape[0], imgs=imgs)
 
                 for ind, (image, segmentation) in enumerate(zip(*torch.unbind(imgs), *torch.unbind(pred_segmentations))):
                     utils.save_image(
