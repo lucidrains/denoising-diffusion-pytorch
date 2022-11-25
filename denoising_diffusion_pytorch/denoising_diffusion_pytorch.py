@@ -1269,7 +1269,7 @@ class TrainerSegmentation(TrainerBase):
                 segmentation,
                 segmentation_filename)  
 
-            if eval_metrics and ground_truth_segmentation:
+            if eval_metrics and ground_truth_segmentation is not None:
                 image_info = {
                     "predicted_segmentation": segmentation_filename,
                     "ground_truth_segmentation": ground_truth_filename,
