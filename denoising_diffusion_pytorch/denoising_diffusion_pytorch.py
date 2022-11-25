@@ -1253,7 +1253,7 @@ class TrainerSegmentation(TrainerBase):
             ground_truth_filename = None
             original_image_filename = None
 
-            if ground_truths_folder and ground_truth:
+            if ground_truths_folder and ground_truth is not None:
                 ground_truth_filename = ground_truths_folder / f"sample_{ind}.png"
                 utils.save_image(
                     ground_truth,
