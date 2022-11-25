@@ -1149,7 +1149,7 @@ class TrainerSegmentation(TrainerBase):
 
                 imgs, _ = torch.unbind(data, dim=1)
                 batches = num_to_groups(self.num_samples, self.batch_size)
-                pred_segmentations = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, img=imgs), batches))
+                pred_segmentations = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, imgs=imgs), batches))
                 print(type(pred_segmentations))
 
                 for ind, (image, segmentation) in enumerate(pred_segmentations):
