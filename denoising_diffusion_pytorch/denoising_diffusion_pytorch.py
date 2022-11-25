@@ -1213,6 +1213,7 @@ class TrainerSegmentation(TrainerBase):
                         batch=imgs,
                         results_folder=results_folder / TESTING_FOLDER / GENERATED_FOLDER,
                         ground_truths_folder=results_folder / TESTING_FOLDER / GT_FOLDER,
+                        original_image_folder=results_folder / TESTING_FOLDER / IMAGE_FOLDER,
                         ground_truth_segmentation=gt_segm,
                         eval_metrics=eval_metrics or self.eval_metrics
                     )
