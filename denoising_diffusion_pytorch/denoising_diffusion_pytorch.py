@@ -1110,6 +1110,7 @@ class TrainerSegmentation(TrainerBase):
         segmentations_folder,
         validate_every = 1000,
         data_split = (0.8, 0.1, 0.1),
+        eval_metrics = EVAL_FUNCTIONS.keys()
         seed = 42,
         *args,
         **kwargs
@@ -1118,6 +1119,7 @@ class TrainerSegmentation(TrainerBase):
         self.validate_every = validate_every
         self.save_every = validate_every
         self.has_already_validated = False
+        self.eval_metrics = eval_metrics
 
         dataset = DatasetSegmentation(
             images_folder=images_folder,
