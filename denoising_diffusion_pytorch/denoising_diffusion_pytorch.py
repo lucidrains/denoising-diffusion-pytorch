@@ -1112,6 +1112,7 @@ class TrainerSegmentation(TrainerBase):
         super().__init__(diffusion_model, *args, **kwargs)
         self.validate_every = validate_every
         self.save_every = validate_every
+        self.has_already_validated = False
 
         dataset = DatasetSegmentation(
             images_folder=images_folder,
@@ -1170,6 +1171,7 @@ class TrainerSegmentation(TrainerBase):
                     curr_valid_step += 1
 
             pbar.set_description(f'Validation loss: {total_loss:.4f}')
+            self.has_already_validated = True
 
     @torch.no_grad()
     def infer_batch(self, batch, results_folder = None, ground_truths_folder = None):
