@@ -27,6 +27,8 @@ from accelerate import Accelerator
 # constants
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
+GENERATED_FOLDER = "generated"
+GT_FOLDER = "ground_truths"
 
 # helpers functions
 
@@ -972,9 +974,9 @@ class TrainerBase():
         if self.accelerator.is_main_process:
             self.ema = EMA(self.model, beta=self.ema_decay, update_every=self.ema_update_every)
             self.results_folder.mkdir(exist_ok=True)
-            (self.results_folder / "generated").mkdir(exist_ok=True, parents=True)
+            (self.results_folder / GENERATED_FOLDER).mkdir(exist_ok=True, parents=True)
             if self.IS_SEGMENTATION_TRAINER:
-                (self.results_folder / "ground_truths").mkdir(exist_ok=True, parents=True)
+                (self.results_folder / GT_FOLDER).mkdir(exist_ok=True, parents=True)
 
         # step counter state
         self.step = 0
@@ -1091,7 +1093,7 @@ class Trainer(TrainerBase):
             for ind, sample in enumerate(all_images_list):
                 utils.save_image(
                     sample,
-                    self.results_folder / f"generated/sample_{milestone}_{ind}.png")       
+                    self.results_folder / f"{GENERATED_FOLDER}/sample_{milestone}_{ind}.png")       
 
 
 class TrainerSegmentation(TrainerBase):
@@ -1139,35 +1141,52 @@ class TrainerSegmentation(TrainerBase):
     @torch.no_grad()
     def validate_or_sample(self):
         if self.step != 0 and self.step % self.validate_every == 0:
-            self.accelerator.print(f"Validation step {self.step}")
-
-            milestone = self.step // self.validate_every
-
-            self.ema.ema_model.eval()
-            device = self.accelerator.device
-
             validation_set_length = len(self.valid_ds)
+            curr_valid_step = 0
+            validation_steps = validation_set_length // self.batch_size + 1
 
-            total_loss = 0.0
-            for _ in range(validation_set_length):
-                data = next(self.valid_dl).to(device)
+            with tqdm(initial = curr_valid_step, total = validation_steps, disable = not accelerator.is_main_process) as pbar:
+                self.accelerator.print(f"Validation step {self.step}...")
 
-                loss = self.model(data)
-                loss = loss / validation_set_length
-                total_loss += loss.item()
+                self.ema.ema_model.eval()
+                device = self.accelerator.device
 
-                imgs, _ = torch.unbind(data, dim=1)
-                pred_segmentations = self.ema.ema_model.sample(batch_size=imgs.shape[0], imgs=imgs)
 
-                imgs_list = list(torch.unbind(imgs))
-                segm_list = list(torch.unbind(pred_segmentations))
+                total_loss = 0.0
+                for _ in range(validation_steps):
+                    data = next(self.valid_dl).to(device)
 
-                for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list)):
-                    utils.save_image(
-                        image,
-                        self.results_folder / f"ground_truths/sample_{milestone}_{ind}.png")    
-                    utils.save_image(
-                        segmentation,
-                        self.results_folder / f"generated/sample_{milestone}_{ind}.png")    
+                    loss = self.model(data)
+                    loss = loss / validation_set_length
+                    total_loss += loss.item()
+
+                    imgs, _ = torch.unbind(data, dim=1)
+
+                    self.infer_batch(
+                        batch=imgs,
+                        results_folder=self.results_folder / GENERATED_FOLDER / f"epoch_{self.step}",
+                        ground_truths_folder=self.results_folder / GT_FOLDER if self.has_already_validated
+                    )
+
+                    curr_valid_step += 1
 
             pbar.set_description(f'Validation loss: {total_loss:.4f}')
+
+    @torch.no_grad()
+    def infer_batch(self, batch, results_folder = None, ground_truths_folder = None):
+        results_folder = results_folder or self.results_folder
+        results_folder.mkdir(exist_ok=True, parents=True)
+
+        pred_segmentations = self.ema.ema_model.sample(batch_size=batch.shape[0], imgs=batch)
+        imgs_list = list(torch.unbind(batch))
+        segm_list = list(torch.unbind(pred_segmentations))
+
+        for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list)):
+            if ground_truths_folder:
+                utils.save_image(
+                    image,
+                    ground_truths_folder / f"sample_{ind}.png")
+
+            utils.save_image(
+                segmentation,
+                results_folder / f"sample_{ind}.png")  
