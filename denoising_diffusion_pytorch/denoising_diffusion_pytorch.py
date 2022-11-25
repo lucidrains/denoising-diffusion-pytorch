@@ -1237,6 +1237,8 @@ class TrainerSegmentation(TrainerBase):
         results_folder.mkdir(exist_ok=True, parents=True)
         if ground_truths_folder:
             ground_truths_folder.mkdir(exist_ok=True, parents=True)
+        if original_image_folder:
+            original_image_folder.mkdir(exist_ok=True, parents=True)
 
         pred_segmentations = self.ema.ema_model.sample(batch_size=batch.shape[0], imgs=batch)
         imgs_list = list(torch.unbind(batch))
