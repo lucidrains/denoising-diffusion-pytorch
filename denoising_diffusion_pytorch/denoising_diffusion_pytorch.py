@@ -1159,12 +1159,15 @@ class TrainerSegmentation(TrainerBase):
                 imgs, _ = torch.unbind(data, dim=1)
                 pred_segmentations = self.ema.ema_model.sample(batch_size=imgs.shape[0], imgs=imgs)
 
-                for ind, (image, segmentation) in enumerate(zip(*torch.unbind(imgs), *torch.unbind(pred_segmentations))):
+                imgs_list = list(torch.unbind(imgs))
+                segm_list = list(torch.unbind(pred_segmentations))
+
+                for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list))):
                     utils.save_image(
                         image,
                         self.results_folder / f"ground_truths/sample_{milestone}_{ind}.png")    
                     utils.save_image(
-                        segmenation,
+                        segmentation,
                         self.results_folder / f"generated/sample_{milestone}_{ind}.png")    
 
             pbar.set_description(f'Validation loss: {total_loss:.4f}')
