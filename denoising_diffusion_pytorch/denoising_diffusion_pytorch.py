@@ -1130,7 +1130,7 @@ class TrainerSegmentation(TrainerBase):
     @torch.no_grad()
     def validate_or_sample(self):
         if self.step != 0 and self.step % self.validate_every == 0:
-            accelerator.print(f"Validation step {self.step}")
+            self.accelerator.print(f"Validation step {self.step}")
 
             milestone = self.step // self.validate_every
 
