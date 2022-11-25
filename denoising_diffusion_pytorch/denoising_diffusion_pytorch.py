@@ -1110,7 +1110,7 @@ class TrainerSegmentation(TrainerBase):
         segmentations_folder,
         validate_every = 1000,
         data_split = (0.8, 0.1, 0.1),
-        eval_metrics = EVAL_FUNCTIONS.keys()
+        eval_metrics = EVAL_FUNCTIONS.keys(),
         seed = 42,
         *args,
         **kwargs
