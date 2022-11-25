@@ -1144,7 +1144,7 @@ class TrainerSegmentation(TrainerBase):
             curr_valid_step = 0
             validation_steps = validation_set_length // self.batch_size + 1
 
-            with tqdm(initial = curr_valid_step, total = validation_steps, disable = not accelerator.is_main_process) as pbar:
+            with tqdm(initial = curr_valid_step, total = validation_steps, disable = not self.accelerator.is_main_process) as pbar:
                 self.accelerator.print(f"Validation step {self.step}...")
 
                 self.ema.ema_model.eval()
