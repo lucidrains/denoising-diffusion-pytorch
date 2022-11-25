@@ -548,8 +548,9 @@ class GaussianDiffusionBase(nn.Module):
         if img is None:
             img = torch.randn(shape, device=device)
         else:
+            t_batched = torch.stack([torch.tensor(self.sampling_timesteps, device = device)] * batch)
             noise = default(noise, lambda: torch.randn_like(img))
-            imgs = self.q_sample(imgs, sampling_timesteps, noise=noise)
+            imgs = self.q_sample(imgs, t_batched, noise=noise)
 
         x_start = None
 
@@ -568,11 +569,12 @@ class GaussianDiffusionBase(nn.Module):
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
+        t_batched = torch.stack([torch.tensor(sampling_timesteps, device = device)] * batch)
         if img is None:
             img = torch.randn(shape, device=device)
         else:
             noise = default(noise, lambda: torch.randn_like(img))
-            img = self.q_sample(img, sampling_timesteps, noise=noise)
+            img = self.q_sample(img, t_batched, noise=noise)
 
         x_start = None
 
