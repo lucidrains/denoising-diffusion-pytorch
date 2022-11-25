@@ -1162,7 +1162,7 @@ class TrainerSegmentation(TrainerBase):
                 imgs_list = list(torch.unbind(imgs))
                 segm_list = list(torch.unbind(pred_segmentations))
 
-                for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list))):
+                for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list)):
                     utils.save_image(
                         image,
                         self.results_folder / f"ground_truths/sample_{milestone}_{ind}.png")    
