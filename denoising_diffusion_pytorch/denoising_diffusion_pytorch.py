@@ -1241,17 +1241,18 @@ class TrainerSegmentation(TrainerBase):
         pred_segmentations = self.ema.ema_model.sample(batch_size=batch.shape[0], imgs=batch)
         imgs_list = list(torch.unbind(batch))
         segm_list = list(torch.unbind(pred_segmentations))
+        gt_list = list(torch.unbind(ground_truth_segmentation)) if ground_truth_segmentation else [None] * len(imgs_list)
 
         eval_results = DataFrame()
-        for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list)):
+        for ind, (image, segmentation, ground_truth) in enumerate(zip(imgs_list, segm_list, gt_list)):
             segmentation_filename = results_folder / f"sample_{ind}.png"
             ground_truth_filename = None
             original_image_filename = None
 
-            if ground_truths_folder:
+            if ground_truths_folder and ground_truth:
                 ground_truth_filename = ground_truths_folder / f"sample_{ind}.png"
                 utils.save_image(
-                    ground_truth_segmentation,
+                    ground_truth,
                     ground_truth_filename)
 
             if original_image_folder:
