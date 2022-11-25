@@ -1223,7 +1223,7 @@ class TrainerSegmentation(TrainerBase):
                 curr_test_step += 1
 
         eval_results.to_csv(results_folder / TESTING_FOLDER / RESULTS_FILE)
-        accelerator.print(f"Mean results: {eval_results.mean(numeric_only=True)}")
+        self.accelerator.print(f"Mean results: {eval_results.mean(numeric_only=True)}")
 
     @torch.no_grad()
     def infer_batch(
