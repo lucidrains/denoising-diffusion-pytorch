@@ -1301,7 +1301,7 @@ class TrainerSegmentation(TrainerBase):
         eval_dict = {key: value for (key, value) in image_info.items() if value}
         for metric in metrics:
             try:
-                eval_dict[metric] = EVAL_FUNCTIONS[metric](prediced, ground_truth)
+                eval_dict[metric] = EVAL_FUNCTIONS[metric](predicted, ground_truth)
             except KeyError:
                 raise ValueError(
                     f"Metric {metric} is not a valid metric. Options are: {EVAL_FUNCTIONS.keys()}")
