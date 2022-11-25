@@ -1164,7 +1164,7 @@ class TrainerSegmentation(TrainerBase):
                     self.infer_batch(
                         batch=imgs,
                         results_folder=self.results_folder / VALIDATION_FOLDER / GENERATED_FOLDER / f"epoch_{self.step}",
-                        ground_truths_folder=self.results_folder VALIDATION_FOLDER / GT_FOLDER if self.has_already_validated
+                        ground_truths_folder=self.results_folder / VALIDATION_FOLDER / GT_FOLDER if self.has_already_validated
                     )
 
                     curr_valid_step += 1
