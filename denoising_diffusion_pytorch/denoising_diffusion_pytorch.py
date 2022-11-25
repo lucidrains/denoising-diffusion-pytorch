@@ -57,6 +57,8 @@ def split_int_in_propotions(num, split):
         ind += 1
         remainder -= 1
 
+    return lengths
+
 def num_to_groups(num, divisor):
     groups = num // divisor
     remainder = num % divisor
