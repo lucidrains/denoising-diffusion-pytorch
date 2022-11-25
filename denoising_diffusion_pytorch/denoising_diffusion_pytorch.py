@@ -27,6 +27,8 @@ from accelerate import Accelerator
 # constants
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
+VALIDATION_FOLDER = "validation"
+TESTING_FOLDER = "testing"
 GENERATED_FOLDER = "generated"
 GT_FOLDER = "ground_truths"
 
@@ -974,9 +976,6 @@ class TrainerBase():
         if self.accelerator.is_main_process:
             self.ema = EMA(self.model, beta=self.ema_decay, update_every=self.ema_update_every)
             self.results_folder.mkdir(exist_ok=True)
-            (self.results_folder / GENERATED_FOLDER).mkdir(exist_ok=True, parents=True)
-            if self.IS_SEGMENTATION_TRAINER:
-                (self.results_folder / GT_FOLDER).mkdir(exist_ok=True, parents=True)
 
         # step counter state
         self.step = 0
@@ -1093,7 +1092,7 @@ class Trainer(TrainerBase):
             for ind, sample in enumerate(all_images_list):
                 utils.save_image(
                     sample,
-                    self.results_folder / f"{GENERATED_FOLDER}/sample_{milestone}_{ind}.png")       
+                    self.results_folder / f"sample_{milestone}_{ind}.png")       
 
 
 class TrainerSegmentation(TrainerBase):
@@ -1164,8 +1163,8 @@ class TrainerSegmentation(TrainerBase):
 
                     self.infer_batch(
                         batch=imgs,
-                        results_folder=self.results_folder / GENERATED_FOLDER / f"epoch_{self.step}",
-                        ground_truths_folder=self.results_folder / GT_FOLDER if self.has_already_validated
+                        results_folder=self.results_folder / VALIDATION_FOLDER / GENERATED_FOLDER / f"epoch_{self.step}",
+                        ground_truths_folder=self.results_folder VALIDATION_FOLDER / GT_FOLDER if self.has_already_validated
                     )
 
                     curr_valid_step += 1
