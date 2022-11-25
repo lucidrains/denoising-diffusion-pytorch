@@ -20,6 +20,7 @@ setup(
     'ema-pytorch',
     'importlib_metadata',
     'packaging',
+    'pandas',
     'pillow',
     'torch',
     'torchvision',

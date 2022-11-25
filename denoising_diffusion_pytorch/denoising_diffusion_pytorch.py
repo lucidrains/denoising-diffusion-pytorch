@@ -19,12 +19,15 @@ from torchvision import transforms as T, utils
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 
+from pandas import DataFrame
+
 from PIL import Image
 from tqdm.auto import tqdm
 from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
+from denoising_diffusion_pytorch.evaluation import EVAL_FUNCTIONS
 # constants
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
@@ -32,6 +35,7 @@ VALIDATION_FOLDER = "validation"
 TESTING_FOLDER = "testing"
 GENERATED_FOLDER = "generated"
 GT_FOLDER = "ground_truths"
+IMAGE_FOLDER = "original_images"
 
 # helpers functions
 
@@ -1138,6 +1142,7 @@ class TrainerSegmentation(TrainerBase):
 
         valid_dl = self.accelerator.prepare(valid_dl)
         self.valid_dl = cycle(valid_dl)
+        self.test_dl = None
 
     @torch.no_grad()
     def validate_or_sample(self):
@@ -1165,7 +1170,8 @@ class TrainerSegmentation(TrainerBase):
                     self.infer_batch(
                         batch=imgs,
                         results_folder=self.results_folder / VALIDATION_FOLDER / GENERATED_FOLDER / f"epoch_{self.step}",
-                        ground_truths_folder=self.results_folder / VALIDATION_FOLDER / GT_FOLDER if not self.has_already_validated else None
+                        ground_truths_folder=self.results_folder / VALIDATION_FOLDER / GT_FOLDER if not self.has_already_validated else None,
+                        original_image_folder=self.results_folder / VALIDATION_FOLDER / IMAGE_FOLDER if not self.has_already_validated else None
                     )
 
                     curr_valid_step += 1
@@ -1174,20 +1180,125 @@ class TrainerSegmentation(TrainerBase):
             self.has_already_validated = True
 
     @torch.no_grad()
-    def infer_batch(self, batch, results_folder = None, ground_truths_folder = None):
+    def test(self, test_ds = None, results_folder = None, eval_metrics = tuple()):
+        if test_ds or not self.test_dl:
+            test_ds = test_ds or self.test_ds
+            test_dl = DataLoader(
+                test_ds,
+                batch_size=self.batch_size,
+                shuffle=True,
+                pin_memory=True,
+                num_workers=cpu_count())
+
+            test_dl = self.accelerator.prepare(test_dl)
+            self.test_dl = cycle(test_dl)
+
+        test_set_length = len(test_ds)
+        curr_test_step = 0
+        test_steps = ceil(test_set_length / self.batch_size)
+
+        results_folder = results_folder or self.results_folder
+
+        self.accelerator.print(f"Testing...")
+        eval_results = DataFrame()
+        with tqdm(initial = curr_test_step, total = test_steps, disable = not self.accelerator.is_main_process) as pbar:
+            device = self.accelerator.device
+            for _ in range(test_steps):
+                data = next(self.test_dl).to(device)
+                imgs, gt_segm = torch.unbind(data, dim=1)
+
+                eval_results = eval_results.append(
+                    self.infer_batch(
+                        batch=imgs,
+                        results_folder=results_folder / TESTING_FOLDER / GENERATED_FOLDER,
+                        ground_truths_folder=results_folder / TESTING_FOLDER / GT_FOLDER,
+                        ground_truth_segmentation=gt_segm,
+                        eval_metrics=eval_metrics or self.eval_metrics
+                    )
+                )
+
+                curr_test_step += 1
+
+        eval_results.to_csv(results_folder / TESTING_FOLDER)
+        accelerator.print(f"Mean results: {eval_results.mean(numeric_only=True)}")
+
+    @torch.no_grad()
+    def infer_batch(
+        self,
+        batch,
+        ground_truth_segmentation = None,
+        results_folder = None,
+        ground_truths_folder = None,
+        original_image_folder = None,
+        threshold = 0.5,
+        eval_metrics = EVAL_FUNCTIONS.keys()
+    ):
         results_folder = results_folder or self.results_folder
         results_folder.mkdir(exist_ok=True, parents=True)
+        if ground_truths_folder:
+            ground_truths_folder.mkdir(exist_ok=True, parents=True)
 
         pred_segmentations = self.ema.ema_model.sample(batch_size=batch.shape[0], imgs=batch)
         imgs_list = list(torch.unbind(batch))
         segm_list = list(torch.unbind(pred_segmentations))
 
+        eval_results = DataFrame()
         for ind, (image, segmentation) in enumerate(zip(imgs_list, segm_list)):
+            segmentation_filename = results_folder / f"sample_{ind}.png"
+            ground_truth_filename = None
+            original_image_filename = None
+
             if ground_truths_folder:
+                ground_truth_filename = ground_truths_folder / f"sample_{ind}.png"
+                utils.save_image(
+                    ground_truth_segmentation,
+                    ground_truth_filename)
+
+            if original_image_folder:
+                original_image_filename = original_image_folder / f"sample_{ind}.png"
                 utils.save_image(
                     image,
-                    ground_truths_folder / f"sample_{ind}.png")
+                    original_image_filename)
 
             utils.save_image(
                 segmentation,
-                results_folder / f"sample_{ind}.png")  
+                segmentation_filename)  
+
+            if eval_metrics and ground_truth_segmentation:
+                image_info = {
+                    "predicted_segmentation": segmentation_filename,
+                    "ground_truth_segmentation": ground_truth_filename,
+                    "original_image": original_image_filename
+                }
+                eval_results = eval_results.append(
+                    self.evaluate(
+                        predicted=segmentation,
+                        ground_truth=ground_truth_segmentation,
+                        image_info=image_info,
+                        metrics=eval_metrics,
+                        index=ind,
+                        threshold=threshold
+                    )
+                )
+
+        return eval_results
+
+    @staticmethod
+    @torch.no_grad()
+    def evaluate(
+        predicted,
+        ground_truth,
+        image_info,
+        metrics = EVAL_FUNCTIONS.keys(),
+        index = 0,
+        threshold = 0.5
+    ):
+        eval_dict = {key: value for (key, value) in image_info.items() if value}
+        for metric in metrics:
+            try:
+                eval_dict[metric] = EVAL_FUNCTIONS[metric](prediced, ground_truth)
+            except KeyError:
+                raise ValueError(
+                    f"Metric {metric} is not a valid metric. Options are: {EVAL_FUNCTIONS.keys()}")
+
+        return DataFrame(eval_dict, index=[index])
