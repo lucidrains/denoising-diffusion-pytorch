@@ -816,6 +816,13 @@ class GaussianDiffusionSegmentationMapping(GaussianDiffusionBase):
         loss = loss * extract(self.p2_loss_weight, t, loss.shape)
         return loss.mean()
 
+    def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False):
+        model_output = self.model(x, t, x_self_cond)
+        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
+        x_start = self.predict_start_from_noise(x, t, pred_noise)
+
+        return ModelPrediction(model_output, maybe_clip(x))
+
     def forward(self, sample_pair, *args, **kwargs):
         img, segmentation = torch.unbind(sample_pair, dim=1)
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
@@ -1150,11 +1157,9 @@ class TrainerSegmentation(TrainerBase):
                 total_loss += loss.item()
 
                 imgs, _ = torch.unbind(data, dim=1)
-                batches = num_to_groups(self.num_samples, self.batch_size)
-                pred_segmentations = list(map(lambda n: self.ema.ema_model.sample(batch_size=n, imgs=imgs), batches))
-                print(type(pred_segmentations))
+                pred_segmentations = self.ema.ema_model.sample(batch_size=self.batch_size, imgs=imgs)
 
-                for ind, (image, segmentation) in enumerate(pred_segmentations):
+                for ind, (image, segmentation) in enumerate(zip(*torch.unbind(imgs), *torch.unbind(pred_segmentations))):
                     utils.save_image(
                         image,
                         self.results_folder / f"ground_truths/sample_{milestone}_{ind}.png")    
