@@ -5,6 +5,7 @@ from random import random
 from functools import partial
 from collections import namedtuple
 from multiprocessing import cpu_count
+from math import ceil
 
 import torch
 from torch import nn, einsum
@@ -1143,11 +1144,10 @@ class TrainerSegmentation(TrainerBase):
         if self.step != 0 and self.step % self.validate_every == 0:
             validation_set_length = len(self.valid_ds)
             curr_valid_step = 0
-            validation_steps = validation_set_length // self.batch_size + 1
+            validation_steps = ceil(validation_set_length / self.batch_size)
 
+            self.accelerator.print(f"Validation step {self.step // self.validate_every}...")
             with tqdm(initial = curr_valid_step, total = validation_steps, disable = not self.accelerator.is_main_process) as pbar:
-                self.accelerator.print(f"Validation step {self.step}...")
-
                 self.ema.ema_model.eval()
                 device = self.accelerator.device
 
@@ -1165,7 +1165,7 @@ class TrainerSegmentation(TrainerBase):
                     self.infer_batch(
                         batch=imgs,
                         results_folder=self.results_folder / VALIDATION_FOLDER / GENERATED_FOLDER / f"epoch_{self.step}",
-                        ground_truths_folder=self.results_folder / VALIDATION_FOLDER / GT_FOLDER if self.has_already_validated else None
+                        ground_truths_folder=self.results_folder / VALIDATION_FOLDER / GT_FOLDER if not self.has_already_validated else None
                     )
 
                     curr_valid_step += 1
