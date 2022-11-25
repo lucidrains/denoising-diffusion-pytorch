@@ -1139,6 +1139,7 @@ class TrainerSegmentation(TrainerBase):
 
             validation_set_length = len(self.valid_ds)
 
+            total_loss = 0.0
             for _ in range(validation_set_length):
                 data = next(self.valid_dl).to(device)
 
