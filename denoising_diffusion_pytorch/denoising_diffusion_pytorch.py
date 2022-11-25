@@ -36,6 +36,7 @@ TESTING_FOLDER = "testing"
 GENERATED_FOLDER = "generated"
 GT_FOLDER = "ground_truths"
 IMAGE_FOLDER = "original_images"
+RESULTS_FILE = "evaluation_results.csv"
 
 # helpers functions
 
@@ -1221,7 +1222,7 @@ class TrainerSegmentation(TrainerBase):
 
                 curr_test_step += 1
 
-        eval_results.to_csv(results_folder / TESTING_FOLDER)
+        eval_results.to_csv(results_folder / TESTING_FOLDER / RESULTS_FILE)
         accelerator.print(f"Mean results: {eval_results.mean(numeric_only=True)}")
 
     @torch.no_grad()
