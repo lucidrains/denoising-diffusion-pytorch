@@ -23,6 +23,8 @@ from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
+from denoising_diffusion_pytorch.version import __version__
+
 # constants
 
 ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
@@ -828,7 +830,8 @@ class Trainer(object):
             'model': self.accelerator.get_state_dict(self.model),
             'opt': self.opt.state_dict(),
             'ema': self.ema.state_dict(),
-            'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None
+            'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None,
+            'version': __version__
         }
 
         torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
@@ -845,6 +848,9 @@ class Trainer(object):
         self.step = data['step']
         self.opt.load_state_dict(data['opt'])
         self.ema.load_state_dict(data['ema'])
+
+        if 'version' in data:
+            print(f"loading from version {data['version']}")
 
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
