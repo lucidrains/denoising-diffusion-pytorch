@@ -810,8 +810,8 @@ class Trainer(object):
         if self.accelerator.is_main_process:
             self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
 
-            self.results_folder = Path(results_folder)
-            self.results_folder.mkdir(exist_ok = True)
+        self.results_folder = Path(results_folder)
+        self.results_folder.mkdir(exist_ok = True)
 
         # step counter state
 
