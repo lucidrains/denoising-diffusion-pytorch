@@ -414,7 +414,7 @@ class GaussianDiffusion1D(nn.Module):
         beta_schedule = 'cosine',
         p2_loss_weight_gamma = 0.,
         p2_loss_weight_k = 1,
-        ddim_sampling_eta = 1.
+        ddim_sampling_eta = 0.
     ):
         super().__init__()
         self.model = model
