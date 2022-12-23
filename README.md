@@ -258,3 +258,11 @@ sampled_seq.shape # (4, 32, 128)
     volume  = {abs/2208.03641}
 }
 ```
+
+```bibtex
+@inproceedings{Jabri2022ScalableAC,
+    title   = {Scalable Adaptive Computation for Iterative Generation},
+    author  = {A. Jabri and David J. Fleet and Ting Chen},
+    year    = {2022}
+}
+```

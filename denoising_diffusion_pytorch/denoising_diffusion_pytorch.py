@@ -401,6 +401,9 @@ def extract(a, t, x_shape):
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 def linear_beta_schedule(timesteps):
+    """
+    linear schedule, proposed in original ddpm paper
+    """
     scale = 1000 / timesteps
     beta_start = scale * 0.0001
     beta_end = scale * 0.02
@@ -412,8 +415,23 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
     """
     steps = timesteps + 1
-    x = torch.linspace(0, timesteps, steps, dtype = torch.float64)
-    alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
+    t = torch.linspace(0, timesteps, steps, dtype = torch.float64) / timesteps
+    alphas_cumprod = torch.cos((t + s) / (1 + s) * math.pi * 0.5) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999)
+
+def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1e-5):
+    """
+    sigmoid schedule
+    proposed in https://arxiv.org/abs/2212.11972 - Figure 8
+    better for images > 64x64, when used during training
+    """
+    steps = timesteps + 1
+    t = torch.linspace(0, timesteps, steps, dtype = torch.float64) / timesteps
+    v_start = torch.tensor(start / tau).sigmoid()
+    v_end = torch.tensor(end / tau).sigmoid()
+    alphas_cumprod = (-((t * (end - start) + start) / tau).sigmoid() + v_end) / (v_end - v_start)
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
@@ -429,6 +447,7 @@ class GaussianDiffusion(nn.Module):
         loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'cosine',
+        schedule_fn_kwargs = dict(),
         p2_loss_weight_gamma = 0., # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time - 1. is recommended
         p2_loss_weight_k = 1,
         ddim_sampling_eta = 0.
@@ -448,11 +467,15 @@ class GaussianDiffusion(nn.Module):
         assert objective in {'pred_noise', 'pred_x0', 'pred_v'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])'
 
         if beta_schedule == 'linear':
-            betas = linear_beta_schedule(timesteps)
+            beta_schedule_fn = linear_beta_schedule
         elif beta_schedule == 'cosine':
-            betas = cosine_beta_schedule(timesteps)
+            beta_schedule_fn = cosine_beta_schedule
+        elif beta_schedule == 'sigmoid':
+            beta_schedule_fn = sigmoid_beta_schedule
         else:
             raise ValueError(f'unknown beta schedule {beta_schedule}')
+
+        betas = beta_schedule_fn(timesteps, **schedule_fn_kwargs)
 
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
