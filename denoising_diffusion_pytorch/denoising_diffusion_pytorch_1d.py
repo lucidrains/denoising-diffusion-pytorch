@@ -411,10 +411,11 @@ class GaussianDiffusion1D(nn.Module):
         sampling_timesteps = None,
         loss_type = 'l1',
         objective = 'pred_noise',
-        beta_schedule = 'sigmoid',
+        beta_schedule = 'cosine',
         p2_loss_weight_gamma = 0.,
         p2_loss_weight_k = 1,
-        ddim_sampling_eta = 0.
+        ddim_sampling_eta = 0.,
+        auto_normalize = True
     ):
         super().__init__()
         self.model = model
@@ -483,6 +484,11 @@ class GaussianDiffusion1D(nn.Module):
         # calculate p2 reweighting
 
         register_buffer('p2_loss_weight', (p2_loss_weight_k + alphas_cumprod / (1 - alphas_cumprod)) ** -p2_loss_weight_gamma)
+
+        # whether to autonormalize
+
+        self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
+        self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (
@@ -570,7 +576,7 @@ class GaussianDiffusion1D(nn.Module):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, t, self_cond)
 
-        img = unnormalize_to_zero_to_one(img)
+        img = self.unnormalize(img)
         return img
 
     @torch.no_grad()
@@ -606,7 +612,7 @@ class GaussianDiffusion1D(nn.Module):
                   c * pred_noise + \
                   sigma * noise
 
-        img = unnormalize_to_zero_to_one(img)
+        img = self.unnormalize(img)
         return img
 
     @torch.no_grad()
@@ -691,5 +697,5 @@ class GaussianDiffusion1D(nn.Module):
         assert n == seq_length, f'seq length must be {seq_length}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
-        img = normalize_to_neg_one_to_one(img)
+        img = self.normalize(img)
         return self.p_losses(img, t, *args, **kwargs)
