@@ -12,7 +12,7 @@ Youtube AI Educators - <a href="https://www.youtube.com/watch?v=W-O7AZNzbzQ">Yan
 
 <a href="https://huggingface.co/blog/annotated-diffusion">Annotated code</a> by Research Scientists / Engineers from <a href="https://huggingface.co/">🤗 Huggingface</a>
 
-Update: Turns out none of the technicalities really matters at all | <a href="https://arxiv.org/abs/2208.09392">"Cold Diffusion" paper</a>
+Update: Turns out none of the technicalities really matters at all | <a href="https://arxiv.org/abs/2208.09392">"Cold Diffusion" paper</a> | <a href="https://muse-model.github.io/">Muse</a>
 
 <img src="./images/sample.png" width="500px"><img>
 
