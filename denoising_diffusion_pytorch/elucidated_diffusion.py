@@ -199,6 +199,31 @@ class ElucidatedDiffusion(nn.Module):
         images = images.clamp(-1., 1.)
         return unnormalize_to_zero_to_one(images)
 
+    # thanks to Katherine Crowson (https://github.com/crowsonkb) for figuring it all out!
+    @torch.no_grad()
+    def sanple_using_dpmpp(self,batch_size = 16, num_sample_steps = None):
+       num_sample_steps = default(num_sample_steps, self.num_sample_steps)
+       sigmas = self.sample_schedule(num_sample_steps)
+       shape = (batch_size, self.channels, self.image_size, self.image_size)
+       images  = sigmas[0] * torch.randn(shape,device=sigmas.device)
+       sigma_fn = lambda t: t.neg().exp()
+       t_fn = lambda sigma: sigma.log().neg()
+       old_denoised = None
+       for i in range(len(sigmas) - 1):
+           denoised = self.preconditioned_network_forward(images, sigmas[i].item())
+           t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
+           h = t_next - t
+           if old_denoised is None or sigmas[i + 1] == 0:
+               images = (sigma_fn(t_next) / sigma_fn(t)) * images - (-h).expm1() * denoised
+           else:
+               h_last = t - t_fn(sigmas[i - 1])
+               r = h_last / h
+               denoised_d = (1 + 1 / (2 * r)) * denoised - (1 / (2 * r)) * old_denoised
+               images = (sigma_fn(t_next) / sigma_fn(t)) * images - (-h).expm1() * denoised_d
+           old_denoised = denoised
+       images = images.clamp(-1., 1.)
+       return unnormalize_to_zero_to_one(x)
+
     # training
 
     def loss_weight(self, sigma):
