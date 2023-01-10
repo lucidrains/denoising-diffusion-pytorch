@@ -199,9 +199,13 @@ class ElucidatedDiffusion(nn.Module):
         images = images.clamp(-1., 1.)
         return unnormalize_to_zero_to_one(images)
 
-    # thanks to Katherine Crowson (https://github.com/crowsonkb) for figuring it all out!
     @torch.no_grad()
     def sample_using_dpmpp(self, batch_size = 16, num_sample_steps = None):
+        """
+        thanks to Katherine Crowson (https://github.com/crowsonkb) for figuring it all out!
+        https://arxiv.org/abs/2211.01095
+        """
+
         device, num_sample_steps = self.device, default(num_sample_steps, self.num_sample_steps)
 
         sigmas = self.sample_schedule(num_sample_steps)
