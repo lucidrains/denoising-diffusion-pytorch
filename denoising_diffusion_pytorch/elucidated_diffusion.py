@@ -201,7 +201,7 @@ class ElucidatedDiffusion(nn.Module):
 
     # thanks to Katherine Crowson (https://github.com/crowsonkb) for figuring it all out!
     @torch.no_grad()
-    def sanple_using_dpmpp(self,batch_size = 16, num_sample_steps = None):
+    def sample_using_dpmpp(self,batch_size = 16, num_sample_steps = None):
        num_sample_steps = default(num_sample_steps, self.num_sample_steps)
        sigmas = self.sample_schedule(num_sample_steps)
        shape = (batch_size, self.channels, self.image_size, self.image_size)

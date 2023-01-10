@@ -266,3 +266,13 @@ sampled_seq.shape # (4, 32, 128)
     year    = {2022}
 }
 ```
+
+```bibtex
+@article{Cheng2022DPMSolverPlusPlus,
+    title   = {DPM-Solver++: Fast Solver for Guided Sampling of Diffusion Probabilistic Models},
+    author  = {Cheng Lu and Yuhao Zhou and Fan Bao and Jianfei Chen and Chongxuan Li and Jun Zhu},
+    journal = {NeuRips 2022 Oral},
+    year    = {2022},
+    volume  = {abs/2211.01095}
+}
+```
