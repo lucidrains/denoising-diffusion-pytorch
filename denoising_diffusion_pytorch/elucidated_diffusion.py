@@ -194,7 +194,7 @@ class ElucidatedDiffusion(nn.Module):
                 images_next = images_hat + 0.5 * (sigma_next - sigma_hat) * (denoised_over_sigma + denoised_prime_over_sigma)
 
             images = images_next
-            x_start = model_output
+            x_start = model_output_next if sigma_next != 0 else model_output
 
         images = images.clamp(-1., 1.)
         return unnormalize_to_zero_to_one(images)
