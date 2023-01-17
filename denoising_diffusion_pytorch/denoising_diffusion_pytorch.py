@@ -450,7 +450,8 @@ class GaussianDiffusion(nn.Module):
         schedule_fn_kwargs = dict(),
         p2_loss_weight_gamma = 0., # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time - 1. is recommended
         p2_loss_weight_k = 1,
-        ddim_sampling_eta = 0.
+        ddim_sampling_eta = 0.,
+        auto_normalize = True
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
@@ -526,6 +527,11 @@ class GaussianDiffusion(nn.Module):
         # calculate p2 reweighting
 
         register_buffer('p2_loss_weight', (p2_loss_weight_k + alphas_cumprod / (1 - alphas_cumprod)) ** -p2_loss_weight_gamma)
+
+        # auto-normalization of data [0, 1] -> [-1, 1] - can turn off by setting it to be False
+
+        self.normalize = normalize_to_neg_one_to_one if auto_normalize else identity
+        self.unnormalize = unnormalize_to_zero_to_one if auto_normalize else identity
 
     def predict_start_from_noise(self, x_t, t, noise):
         return (
@@ -617,7 +623,7 @@ class GaussianDiffusion(nn.Module):
 
         ret = img if not return_all_timesteps else torch.stack(imgs, dim = 1)
 
-        ret = unnormalize_to_zero_to_one(ret)
+        ret = self.unnormalize(ret)
         return ret
 
     @torch.no_grad()
@@ -658,7 +664,7 @@ class GaussianDiffusion(nn.Module):
 
         ret = img if not return_all_timesteps else torch.stack(imgs, dim = 1)
 
-        ret = unnormalize_to_zero_to_one(ret)
+        ret = self.unnormalize(ret)
         return ret
 
     @torch.no_grad()
@@ -743,7 +749,7 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
-        img = normalize_to_neg_one_to_one(img)
+        img = self.normalize(img)
         return self.p_losses(img, t, *args, **kwargs)
 
 # dataset classes
