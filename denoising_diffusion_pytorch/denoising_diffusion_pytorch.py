@@ -601,7 +601,7 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def p_sample(self, x, t: int, x_self_cond = None):
         b, *_, device = *x.shape, x.device
-        batched_times = torch.full((x.shape[0],), t, device = x.device, dtype = torch.long)
+        batched_times = torch.full((b,), t, device = x.device, dtype = torch.long)
         model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = True)
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
@@ -680,12 +680,16 @@ class GaussianDiffusion(nn.Module):
 
         assert x1.shape == x2.shape
 
-        t_batched = torch.stack([torch.tensor(t, device = device)] * b)
+        t_batched = torch.full((b,), t, device = device)
         xt1, xt2 = map(lambda x: self.q_sample(x, t = t_batched), (x1, x2))
 
         img = (1 - lam) * xt1 + lam * xt2
+
+        x_start = None
+
         for i in tqdm(reversed(range(0, t)), desc = 'interpolation sample time step', total = t):
-            img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long))
+            self_cond = x_start if self.self_condition else None
+            img, x_start = self.p_sample(img, i, self_cond)
 
         return img
 
