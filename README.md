@@ -276,3 +276,11 @@ sampled_seq.shape # (4, 32, 128)
     volume  = {abs/2211.01095}
 }
 ```
+
+```bibtex
+@inproceedings{Hoogeboom2023simpleDE,
+    title   = {simple diffusion: End-to-end diffusion for high resolution images},
+    author  = {Emiel Hoogeboom and Jonathan Heek and Tim Salimans},
+    year    = {2023}
+}
+```
