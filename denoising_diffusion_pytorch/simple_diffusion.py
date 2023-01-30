@@ -1,4 +1,6 @@
 import math
+from functools import partial
+
 import torch
 from torch import sqrt
 from torch import nn, einsum
@@ -6,7 +8,7 @@ import torch.nn.functional as F
 from torch.special import expm1
 
 from tqdm import tqdm
-from einops import rearrange, repeat, reduce
+from einops import rearrange, repeat, reduce, pack, unpack
 from einops.layers.torch import Rearrange
 
 # helpers
@@ -41,16 +43,27 @@ def Downsample(dim, dim_out = None):
         nn.Conv2d(dim * 4, default(dim_out, dim), 1)
     )
 
-class LayerNorm(nn.Module):
-    def __init__(self, dim):
+class ConvLayerNorm(nn.Module):
+    def __init__(self, dim, scale = True):
         super().__init__()
-        self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
+        self.g = nn.Parameter(torch.ones(1, dim, 1, 1)) if scale else 1
 
     def forward(self, x):
         eps = 1e-5 if x.dtype == torch.float32 else 1e-3
         var = torch.var(x, dim = 1, unbiased = False, keepdim = True)
         mean = torch.mean(x, dim = 1, keepdim = True)
-        return (x - mean) * (var + eps).rsqrt() * self.g
+        return (x - mean) * var.clamp(min = eps).rsqrt() * self.g
+
+class LayerNorm(nn.Module):
+    def __init__(self, dim, scale = True):
+        super().__init__()
+        self.g = nn.Parameter(torch.ones(1, 1, dim)) if scale else 1
+
+    def forward(self, x):
+        eps = 1e-5 if x.dtype == torch.float32 else 1e-3
+        var = torch.var(x, dim = -1, unbiased = False, keepdim = True)
+        mean = torch.mean(x, dim = -1, keepdim = True)
+        return (x - mean) * var.clamp(min = eps).rsqrt() * self.g
 
 class PreNorm(nn.Module):
     def __init__(self, dim, fn):
@@ -133,15 +146,20 @@ class LinearAttention(nn.Module):
         self.scale = dim_head ** -0.5
         self.heads = heads
         hidden_dim = dim_head * heads
+
+        self.norm = ConvLayerNorm(dim)
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
             nn.Conv2d(hidden_dim, dim, 1),
-            LayerNorm(dim)
+            ConvLayerNorm(dim)
         )
 
     def forward(self, x):
         b, c, h, w = x.shape
+
+        x = self.norm(x)
+
         qkv = self.to_qkv(x).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
 
@@ -158,32 +176,102 @@ class LinearAttention(nn.Module):
         return self.to_out(out)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 4, dim_head = 32):
+    def __init__(self, dim, heads = 4, dim_head = 32, dropout = 0.):
         super().__init__()
         self.scale = dim_head ** -0.5
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
-        self.to_out = nn.Conv2d(hidden_dim, dim, 1)
+        self.norm = LayerNorm(dim)
+
+        self.attn_dropout = nn.Dropout(dropout)
+        self.to_qkv = nn.Linear(dim, hidden_dim * 3, bias = False)
+        self.to_out = nn.Linear(hidden_dim, dim, bias = False)
 
     def forward(self, x):
-        b, c, h, w = x.shape
-        qkv = self.to_qkv(x).chunk(3, dim = 1)
-        q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h c (x y)', h = self.heads), qkv)
+        x = self.norm(x)
+
+        qkv = self.to_qkv(x).chunk(3, dim = -1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
         q = q * self.scale
 
-        sim = einsum('b h d i, b h d j -> b h i j', q, k)
-        attn = sim.softmax(dim = -1)
-        out = einsum('b h i j, b h d j -> b h i d', attn, v)
+        sim = einsum('b h i d, b h j d -> b h i j', q, k)
 
-        out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
+        attn = sim.softmax(dim = -1)
+        attn = self.attn_dropout(attn)
+
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+
+        out = rearrange(out, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
+class FeedForward(nn.Module):
+    def __init__(
+        self,
+        dim,
+        cond_dim,
+        mult = 4,
+        dropout = 0.
+    ):
+        super().__init__()
+        self.norm = LayerNorm(dim, scale = False)
+
+        self.to_scale_shift = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(cond_dim, dim * 2),
+            Rearrange('b d -> b 1 d')
+        )
+
+        to_scale_shift_linear = self.to_scale_shift[-2]
+        nn.init.zeros_(to_scale_shift_linear.weight)
+        nn.init.zeros_(to_scale_shift_linear.bias)
+
+        self.net = nn.Sequential(
+            nn.Linear(dim, dim * mult, bias = False),
+            nn.GELU(),
+            nn.Linear(dim * mult, dim, bias = False)
+        )
+
+    def forward(self, x, t):
+        x = self.norm(x)
+        scale, shift = self.to_scale_shift(t).chunk(2, dim = -1)
+        x = x * (scale + 1) + shift
+
+        x = self.net(x)
+        return x
+
+# vit
+
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        dim,
+        time_cond_dim,
+        depth,
+        dim_head = 32,
+        heads = 4,
+        ff_mult = 4,
+        dropout = 0.,
+    ):
+        super().__init__()
+
+        self.layers = nn.ModuleList([])
+        for _ in range(depth):
+            self.layers.append(nn.ModuleList([
+                Attention(dim = dim, dim_head = dim_head, heads = heads, dropout = dropout),
+                FeedForward(dim = dim, mult = ff_mult, cond_dim = time_cond_dim, dropout = dropout)
+            ]))
+
+    def forward(self, x, t):
+        for attn, ff in self.layers:
+            x = attn(x) + x
+            x = ff(x, t) + x
+
+        return x
 # model
 
-class Unet(nn.Module):
+class UViT(nn.Module):
     def __init__(
         self,
         dim,
@@ -191,6 +279,11 @@ class Unet(nn.Module):
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         channels = 3,
+        vit_depth = 6,
+        vit_dropout = 0.2,
+        attn_dim_head = 32,
+        attn_heads = 4,
+        ff_mult = 4,
         self_condition = False,
         resnet_block_groups = 8,
         random_fourier_features = False,
@@ -216,8 +309,6 @@ class Unet(nn.Module):
 
         time_dim = dim * 4
 
-        self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
-
         sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
         fourier_dim = learned_sinusoidal_dim + 1
 
@@ -240,14 +331,21 @@ class Unet(nn.Module):
             self.downs.append(nn.ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Residual(LinearAttention(dim_in)),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim)))
-        self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+
+        self.vit = Transformer(
+            dim = mid_dim,
+            time_cond_dim = time_dim,
+            depth = vit_depth,
+            dim_head = attn_dim_head,
+            heads = attn_heads,
+            ff_mult = ff_mult,
+            dropout = vit_dropout
+        )
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind == (len(in_out) - 1)
@@ -255,7 +353,7 @@ class Unet(nn.Module):
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
+                Residual(LinearAttention(dim_out)),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
 
@@ -287,9 +385,13 @@ class Unet(nn.Module):
 
             x = downsample(x)
 
-        x = self.mid_block1(x, t)
-        x = self.mid_attn(x)
-        x = self.mid_block2(x, t)
+        x = rearrange(x, 'b c h w -> b h w c')
+        x, ps = pack([x], 'b * c')
+
+        x = self.vit(x, t)
+
+        x, = unpack(x, ps, 'b * c')
+        x = rearrange(x, 'b h w c -> b c h w')
 
         for block1, block2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim = 1)
@@ -345,9 +447,6 @@ class GaussianDiffusion(nn.Module):
         clip_sample_denoised = True,
     ):
         super().__init__()
-        assert model.random_or_learned_sinusoidal_cond
-        assert not model.self_condition, 'not supported yet'
-
         self.model = model
 
         # image dimensions
@@ -356,8 +455,6 @@ class GaussianDiffusion(nn.Module):
         self.image_size = image_size
 
         # continuous noise schedule related stuff
-
-        self.loss_type = loss_type
 
         if noise_schedule == 'linear':
             self.log_snr = beta_linear_log_snr
@@ -459,6 +556,6 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
 
         img = normalize_to_neg_one_to_one(img)
-        times = torch.zeros((batch_size,), device = self.device).float().uniform_(0, 1)
+        times = torch.zeros((img.shape[0],), device = self.device).float().uniform_(0, 1)
 
         return self.p_losses(img, times, *args, **kwargs)
