@@ -29,14 +29,6 @@ def default(val, d):
 
 # u-vit related functions and modules
 
-class Residual(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, x, *args, **kwargs):
-        return self.fn(x, *args, **kwargs) + x
-
 def Upsample(dim, dim_out = None):
     return nn.Sequential(
         nn.Upsample(scale_factor = 2, mode = 'nearest'),
@@ -162,6 +154,8 @@ class LinearAttention(nn.Module):
         )
 
     def forward(self, x):
+        residual = x
+
         b, c, h, w = x.shape
 
         x = self.norm(x)
@@ -179,7 +173,8 @@ class LinearAttention(nn.Module):
 
         out = torch.einsum('b h d e, b h d n -> b h e n', context, q)
         out = rearrange(out, 'b h c (x y) -> b (h c) x y', h = self.heads, x = h, y = w)
-        return self.to_out(out)
+
+        return self.to_out(out) + residual
 
 class Attention(nn.Module):
     def __init__(self, dim, heads = 4, dim_head = 32, dropout = 0.):
@@ -334,7 +329,7 @@ class UViT(nn.Module):
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
-        block_klass = partial(ResnetBlock, groups = resnet_block_groups)
+        resnet_block = partial(ResnetBlock, groups = resnet_block_groups)
 
         # time embeddings
 
@@ -360,9 +355,9 @@ class UViT(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Residual(LinearAttention(dim_in)),
+                resnet_block(dim_in, dim_in, time_emb_dim = time_dim),
+                resnet_block(dim_in, dim_in, time_emb_dim = time_dim),
+                LinearAttention(dim_in),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
@@ -382,16 +377,16 @@ class UViT(nn.Module):
             is_last = ind == (len(in_out) - 1)
 
             self.ups.append(nn.ModuleList([
-                block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                Residual(LinearAttention(dim_out)),
+                resnet_block(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                resnet_block(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                LinearAttention(dim_out),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
 
         default_out_dim = input_channels
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
+        self.final_res_block = resnet_block(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     def forward(self, x, time):
