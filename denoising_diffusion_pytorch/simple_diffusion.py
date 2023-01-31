@@ -466,10 +466,11 @@ def logsnr_schedule_interpolated(fn, image_d, noise_d_low, noise_d_high):
 class GaussianDiffusion(nn.Module):
     def __init__(
         self,
-        model,
+        model: UViT,
         *,
         image_size,
         channels = 3,
+        pred_objective = 'v',
         noise_schedule = logsnr_schedule_cosine,
         noise_d = None,
         noise_d_low = None,
@@ -478,12 +479,18 @@ class GaussianDiffusion(nn.Module):
         clip_sample_denoised = True,
     ):
         super().__init__()
+        assert pred_objective in {'v', 'eps'}, 'whether to predict v-space (progressive distillation paper) or noise'
+
         self.model = model
 
         # image dimensions
 
         self.channels = channels
         self.image_size = image_size
+
+        # training objective
+
+        self.pred_objective = pred_objective
 
         # noise schedule
 
@@ -522,9 +529,13 @@ class GaussianDiffusion(nn.Module):
         alpha, sigma, alpha_next = map(sqrt, (squared_alpha, squared_sigma, squared_alpha_next))
 
         batch_log_snr = repeat(log_snr, ' -> b', b = x.shape[0])
-        pred_noise = self.model(x, batch_log_snr)
+        pred = self.model(x, batch_log_snr)
 
-        x_start = (x - sigma * pred_noise) / alpha
+        if self.pred_objective == 'v':
+            x_start = alpha * x - sigma * pred
+
+        elif self.pred_objective == 'eps':
+            x_start = (x - sigma * pred) / alpha
 
         x_start.clamp_(-1., 1.)
 
@@ -586,6 +597,14 @@ class GaussianDiffusion(nn.Module):
 
         x, log_snr = self.q_sample(x_start = x_start, times = times, noise = noise)
         model_out = self.model(x, log_snr)
+
+        if self.pred_objective == 'v':
+            padded_log_snr = right_pad_dims_to(x, log_snr)
+            alpha, sigma = padded_log_snr.sigmoid().sqrt(), (-padded_log_snr).sigmoid().sqrt()
+            target = alpha * noise - sigma * x_start
+
+        elif self.pred_objective == 'eps':
+            target = noise
 
         return F.mse_loss(model_out, noise)
 
