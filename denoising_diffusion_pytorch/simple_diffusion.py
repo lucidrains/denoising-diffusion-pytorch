@@ -1,5 +1,5 @@
 import math
-from functools import partial
+from functools import partial, wraps
 
 import torch
 from torch import sqrt
@@ -424,16 +424,38 @@ def right_pad_dims_to(x, t):
         return t
     return t.view(*t.shape, *((1,) * padding_dims))
 
-# log(snr) schedules
+# logsnr schedules and shifting / interpolating decorators
+# only cosine for now
 
 def log(t, eps = 1e-20):
     return torch.log(t.clamp(min = eps))
 
-def beta_linear_log_snr(t):
-    return -log(expm1(1e-4 + 10 * (t ** 2)))
+def logsnr_schedule_cosine(t, logsnr_min = -15, logsnr_max = 15):
+    t_min = math.atan(math.exp(-0.5 * logsnr_max))
+    t_max = math.atan(math.exp(-0.5 * logsnr_min))
+    return -2 * log(torch.tan(t_min + t * (t_max - t_min)))
 
-def alpha_cosine_log_snr(t, s = 0.008):
-    return -log((torch.cos((t + s) / (1 + s) * math.pi * 0.5) ** -2) - 1, eps = 1e-5)
+def logsnr_schedule_shifted(fn, image_d, noise_d):
+    shift = 2 * math.log(noise_d / image_d)
+    @wraps(fn)
+    def inner(*args, **kwargs):
+        nonlocal shift
+        return fn(*args, **kwargs) + shift
+    return inner
+
+def logsnr_schedule_interpolated(fn, image_d, noise_d_low, noise_d_high):
+    logsnr_low_fn = logsnr_schedule_shifted(fn, image_d, noise_d_low)
+    logsnr_high_fn = logsnr_schedule_shifted(fn, image_d, noise_d_high)
+
+    @wraps(fn)
+    def inner(t, *args, **kwargs):
+        nonlocal logsnr_low_fn
+        nonlocal logsnr_high_fn
+        return t * logsnr_low_fn(t, *args, **kwargs) + (1 - t) * logsnr_high_fn(t, *args, **kwargs)
+
+    return inner
+
+# main gaussian diffusion class
 
 class GaussianDiffusion(nn.Module):
     def __init__(
@@ -442,7 +464,10 @@ class GaussianDiffusion(nn.Module):
         *,
         image_size,
         channels = 3,
-        noise_schedule = 'linear',
+        noise_schedule = logsnr_schedule_cosine,
+        noise_d = None,
+        noise_d_low = None,
+        noise_d_high = None,
         num_sample_steps = 500,
         clip_sample_denoised = True,
     ):
@@ -454,14 +479,21 @@ class GaussianDiffusion(nn.Module):
         self.channels = channels
         self.image_size = image_size
 
-        # continuous noise schedule related stuff
+        # noise schedule
 
-        if noise_schedule == 'linear':
-            self.log_snr = beta_linear_log_snr
-        elif noise_schedule == 'cosine':
-            self.log_snr = alpha_cosine_log_snr
-        else:
-            raise ValueError(f'unknown noise schedule {noise_schedule}')
+        assert not all([*map(exists, (noise_d, noise_d_low, noise_d_high))]), 'you must either set noise_d for shifted schedule, or noise_d_low and noise_d_high for shifted and interpolated schedule'
+
+        # determine shifting or interpolated schedules
+
+        self.log_snr = noise_schedule
+
+        if exists(noise_d):
+            self.log_snr = logsnr_schedule_shifted(self.log_snr, image_size, noise_d)
+
+        if exists(noise_d_low) or exists(noise_d_high):
+            assert exists(noise_d_low) and exists(noise_d_high), 'both noise_d_low and noise_d_high must be set'
+
+            self.log_snr = logsnr_schedule_interpolated(self.log_snr, image_size, noise_d_low, noise_d_high)
 
         # sampling
 
