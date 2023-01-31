@@ -216,10 +216,11 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
         self.norm = LayerNorm(dim, scale = False)
+        dim_hidden = dim * mult
 
         self.to_scale_shift = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(cond_dim, dim * 2),
+            nn.Linear(cond_dim, dim_hidden * 2),
             Rearrange('b d -> b 1 d')
         )
 
@@ -227,19 +228,24 @@ class FeedForward(nn.Module):
         nn.init.zeros_(to_scale_shift_linear.weight)
         nn.init.zeros_(to_scale_shift_linear.bias)
 
-        self.net = nn.Sequential(
-            nn.Linear(dim, dim * mult, bias = False),
-            nn.GELU(),
-            nn.Linear(dim * mult, dim, bias = False)
+        self.proj_in = nn.Sequential(
+            nn.Linear(dim, dim_hidden, bias = False),
+            nn.SiLU()
+        )
+
+        self.proj_out = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(dim_hidden, dim, bias = False)
         )
 
     def forward(self, x, t):
         x = self.norm(x)
+        x = self.proj_in(x)
+
         scale, shift = self.to_scale_shift(t).chunk(2, dim = -1)
         x = x * (scale + 1) + shift
 
-        x = self.net(x)
-        return x
+        return self.proj_out(x)
 
 # vit
 
