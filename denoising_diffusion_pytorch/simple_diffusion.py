@@ -16,10 +16,16 @@ from einops.layers.torch import Rearrange
 def exists(val):
     return val is not None
 
+def identity(t):
+    return t
+
+def is_lambda(f):
+    return callable(f) and f.__name__ == "<lambda>"
+
 def default(val, d):
     if exists(val):
         return val
-    return d() if callable(d) else d
+    return d() if is_lambda(d) else d
 
 # u-vit related functions and modules
 
@@ -290,18 +296,37 @@ class UViT(nn.Module):
         attn_dim_head = 32,
         attn_heads = 4,
         ff_mult = 4,
-        self_condition = False,
         resnet_block_groups = 8,
         random_fourier_features = False,
-        learned_sinusoidal_dim = 16
+        learned_sinusoidal_dim = 16,
+        init_img_transform: callable = None,
+        final_img_itransform: callable = None,
+        patch_size = 1,
     ):
         super().__init__()
 
-        # determine dimensions
+        # for initial dwt transform (or whatever transform researcher wants to try here)
 
-        self.channels = channels
-        self.self_condition = self_condition
-        input_channels = channels * (2 if self_condition else 1)
+        if exists(init_img_transform) and exists(final_img_itransform):
+            init_shape = torch.Size(1, 1, 32, 32)
+            mock_tensor = torch.randn(init_shape)
+            assert final_img_itransform(init_img_transform(mock_tensor)).shape == init_shape
+
+        self.init_img_transform = default(init_img_transform, identity)
+        self.final_img_itransform = default(final_img_itransform, identity)
+
+        input_channels = channels
+
+        # whether to do initial patching, as alternative to dwt
+
+        self.patchify = self.unpatchify = identity
+
+        if patch_size > 1:
+            input_channels = channels * (patch_size ** 2)
+            self.patchify = nn.Conv2d(channels, input_channels, patch_size, stride = patch_size)
+            self.unpatchify = nn.ConvTranspose2d(input_channels, channels, patch_size, stride = patch_size)
+
+        # determine dimensions
 
         init_dim = default(init_dim, dim)
         self.init_conv = nn.Conv2d(input_channels, init_dim, 7, padding = 3)
@@ -363,16 +388,15 @@ class UViT(nn.Module):
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
 
-        default_out_dim = channels
+        default_out_dim = input_channels
         self.out_dim = default(out_dim, default_out_dim)
 
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
-    def forward(self, x, time, x_self_cond = None):
-        if self.self_condition:
-            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
-            x = torch.cat((x_self_cond, x), dim = 1)
+    def forward(self, x, time):
+        x = self.init_img_transform(x)
+        x = self.patchify(x)
 
         x = self.init_conv(x)
         r = x.clone()
@@ -412,7 +436,10 @@ class UViT(nn.Module):
         x = torch.cat((x, r), dim = 1)
 
         x = self.final_res_block(x, t)
-        return self.final_conv(x)
+        x = self.final_conv(x)
+
+        x = self.unpatchify(x)
+        return self.final_img_itransform(x)
 
 # normalization functions
 
