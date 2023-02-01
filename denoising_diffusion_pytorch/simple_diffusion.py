@@ -654,7 +654,7 @@ class GaussianDiffusion(nn.Module):
         elif self.pred_objective == 'eps':
             target = noise
 
-        return F.mse_loss(model_out, noise)
+        return F.mse_loss(model_out, target)
 
     def forward(self, img, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
