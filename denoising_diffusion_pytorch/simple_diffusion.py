@@ -27,63 +27,84 @@ def default(val, d):
         return val
     return d() if is_lambda(d) else d
 
+def cast_tuple(t, l = 1):
+    return ((t,) * l) if not isinstance(t, tuple) else t
+
+def append_dims(t, dims):
+    shape = t.shape
+    return t.reshape(*shape, *((1,) * dims))
+
 # u-vit related functions and modules
 
-def Upsample(dim, dim_out = None):
-    return nn.Sequential(
-        nn.Upsample(scale_factor = 2, mode = 'nearest'),
-        nn.Conv2d(dim, default(dim_out, dim), 3, padding = 1)
-    )
-
-def Downsample(dim, dim_out = None):
-    return nn.Sequential(
-        Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1 = 2, p2 = 2),
-        nn.Conv2d(dim * 4, default(dim_out, dim), 1)
-    )
-
-class ConvLayerNorm(nn.Module):
-    def __init__(self, dim, scale = True):
+class Upsample(nn.Module):
+    def __init__(
+        self,
+        dim,
+        dim_out = None,
+        factor = 2
+    ):
         super().__init__()
-        self.g = nn.Parameter(torch.ones(1, dim, 1, 1)) if scale else 1
+        self.factor = factor
+        self.factor_squared = factor ** 2
+
+        dim_out = default(dim_out, dim)
+        conv = nn.Conv2d(dim, dim_out * self.factor_squared, 1)
+
+        self.net = nn.Sequential(
+            conv,
+            nn.SiLU(),
+            nn.PixelShuffle(factor)
+        )
+
+        self.init_conv_(conv)
+
+    def init_conv_(self, conv):
+        o, i, h, w = conv.weight.shape
+        conv_weight = torch.empty(o // self.factor_squared, i, h, w)
+        nn.init.kaiming_uniform_(conv_weight)
+        conv_weight = repeat(conv_weight, 'o ... -> (o r) ...', r = self.factor_squared)
+
+        conv.weight.data.copy_(conv_weight)
+        nn.init.zeros_(conv.bias.data)
 
     def forward(self, x):
-        eps = 1e-5 if x.dtype == torch.float32 else 1e-3
-        var = torch.var(x, dim = 1, unbiased = False, keepdim = True)
-        mean = torch.mean(x, dim = 1, keepdim = True)
-        return (x - mean) * var.clamp(min = eps).rsqrt() * self.g
+        return self.net(x)
+
+def Downsample(
+    dim,
+    dim_out = None,
+    factor = 2
+):
+    return nn.Sequential(
+        Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1 = factor, p2 = factor),
+        nn.Conv2d(dim * (factor ** 2), default(dim_out, dim), 1)
+    )
 
 class LayerNorm(nn.Module):
-    def __init__(self, dim, scale = True):
+    def __init__(self, dim, scale = True, normalize_dim = 2):
         super().__init__()
-        self.g = nn.Parameter(torch.ones(1, 1, dim)) if scale else 1
+        self.g = nn.Parameter(torch.ones(dim)) if scale else 1
+
+        self.scale = scale
+        self.normalize_dim = normalize_dim
 
     def forward(self, x):
+        normalize_dim = self.normalize_dim
+        scale = append_dims(self.g, x.ndim - self.normalize_dim - 1) if self.scale else 1
+
         eps = 1e-5 if x.dtype == torch.float32 else 1e-3
-        var = torch.var(x, dim = -1, unbiased = False, keepdim = True)
-        mean = torch.mean(x, dim = -1, keepdim = True)
-        return (x - mean) * var.clamp(min = eps).rsqrt() * self.g
-
-class PreNorm(nn.Module):
-    def __init__(self, dim, fn):
-        super().__init__()
-        self.fn = fn
-        self.norm = LayerNorm(dim)
-
-    def forward(self, x):
-        x = self.norm(x)
-        return self.fn(x)
+        var = torch.var(x, dim = normalize_dim, unbiased = False, keepdim = True)
+        mean = torch.mean(x, dim = normalize_dim, keepdim = True)
+        return (x - mean) * var.clamp(min = eps).rsqrt() * scale
 
 # sinusoidal positional embeds
 
-class RandomOrLearnedSinusoidalPosEmb(nn.Module):
-    """ following @crowsonkb 's lead with random (learned optional) sinusoidal pos emb """
-    """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
-
-    def __init__(self, dim, is_random = False):
+class LearnedSinusoidalPosEmb(nn.Module):
+    def __init__(self, dim):
         super().__init__()
         assert (dim % 2) == 0
         half_dim = dim // 2
-        self.weights = nn.Parameter(torch.randn(half_dim), requires_grad = not is_random)
+        self.weights = nn.Parameter(torch.randn(half_dim))
 
     def forward(self, x):
         x = rearrange(x, 'b -> b 1')
@@ -145,12 +166,12 @@ class LinearAttention(nn.Module):
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        self.norm = ConvLayerNorm(dim)
+        self.norm = LayerNorm(dim, normalize_dim = 1)
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
             nn.Conv2d(hidden_dim, dim, 1),
-            ConvLayerNorm(dim)
+            LayerNorm(dim, normalize_dim = 1)
         )
 
     def forward(self, x):
@@ -284,7 +305,8 @@ class UViT(nn.Module):
         dim,
         init_dim = None,
         out_dim = None,
-        dim_mults=(1, 2, 4, 8),
+        dim_mults = (1, 2, 4, 8),
+        downsample_factor = 2,
         channels = 3,
         vit_depth = 6,
         vit_dropout = 0.2,
@@ -292,7 +314,6 @@ class UViT(nn.Module):
         attn_heads = 4,
         ff_mult = 4,
         resnet_block_groups = 8,
-        random_fourier_features = False,
         learned_sinusoidal_dim = 16,
         init_img_transform: callable = None,
         final_img_itransform: callable = None,
@@ -335,7 +356,7 @@ class UViT(nn.Module):
 
         time_dim = dim * 4
 
-        sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
+        sinu_pos_emb = LearnedSinusoidalPosEmb(learned_sinusoidal_dim)
         fourier_dim = learned_sinusoidal_dim + 1
 
         self.time_mlp = nn.Sequential(
@@ -345,20 +366,25 @@ class UViT(nn.Module):
             nn.Linear(time_dim, time_dim)
         )
 
+        # downsample factors
+
+        downsample_factor = cast_tuple(downsample_factor, len(dim_mults))
+        assert len(downsample_factor) == len(dim_mults)
+
         # layers
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
 
-        for ind, (dim_in, dim_out) in enumerate(in_out):
+        for ind, ((dim_in, dim_out), factor) in enumerate(zip(in_out, downsample_factor)):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
                 resnet_block(dim_in, dim_in, time_emb_dim = time_dim),
                 resnet_block(dim_in, dim_in, time_emb_dim = time_dim),
                 LinearAttention(dim_in),
-                Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
+                Downsample(dim_in, dim_out, factor = factor)
             ]))
 
         mid_dim = dims[-1]
@@ -373,14 +399,14 @@ class UViT(nn.Module):
             dropout = vit_dropout
         )
 
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
+        for ind, ((dim_in, dim_out), factor) in enumerate(zip(reversed(in_out), reversed(downsample_factor))):
             is_last = ind == (len(in_out) - 1)
 
             self.ups.append(nn.ModuleList([
-                resnet_block(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                resnet_block(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                LinearAttention(dim_out),
-                Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
+                Upsample(dim_out, dim_in, factor = factor),
+                resnet_block(dim_in * 2, dim_in, time_emb_dim = time_dim),
+                resnet_block(dim_in * 2, dim_in, time_emb_dim = time_dim),
+                LinearAttention(dim_in),
             ]))
 
         default_out_dim = input_channels
@@ -418,15 +444,15 @@ class UViT(nn.Module):
         x, = unpack(x, ps, 'b * c')
         x = rearrange(x, 'b h w c -> b c h w')
 
-        for block1, block2, attn, upsample in self.ups:
+        for upsample, block1, block2, attn in self.ups:
+            x = upsample(x)
+
             x = torch.cat((x, h.pop()), dim = 1)
             x = block1(x, t)
 
             x = torch.cat((x, h.pop()), dim = 1)
             x = block2(x, t)
             x = attn(x)
-
-            x = upsample(x)
 
         x = torch.cat((x, r), dim = 1)
 
