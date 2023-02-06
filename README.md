@@ -59,7 +59,7 @@ from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer
 model = Unet(
     dim = 64,
     dim_mults = (1, 2, 4, 8)
-).cuda()
+)
 
 diffusion = GaussianDiffusion(
     model,
@@ -67,7 +67,7 @@ diffusion = GaussianDiffusion(
     timesteps = 1000,           # number of steps
     sampling_timesteps = 250,   # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
     loss_type = 'l1'            # L1 or L2
-).cuda()
+)
 
 trainer = Trainer(
     diffusion,
