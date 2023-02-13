@@ -34,6 +34,9 @@ def append_dims(t, dims):
     shape = t.shape
     return t.reshape(*shape, *((1,) * dims))
 
+def l2norm(t):
+    return F.normalize(t, dim = -1)
+
 # u-vit related functions and modules
 
 class Upsample(nn.Module):
@@ -198,9 +201,9 @@ class LinearAttention(nn.Module):
         return self.to_out(out) + residual
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 4, dim_head = 32, dropout = 0.):
+    def __init__(self, dim, heads = 4, dim_head = 32, scale = 8, dropout = 0.):
         super().__init__()
-        self.scale = dim_head ** -0.5
+        self.scale = scale
         self.heads = heads
         hidden_dim = dim_head * heads
 
@@ -208,6 +211,10 @@ class Attention(nn.Module):
 
         self.attn_dropout = nn.Dropout(dropout)
         self.to_qkv = nn.Linear(dim, hidden_dim * 3, bias = False)
+
+        self.q_scale = nn.Parameter(torch.ones(dim_head))
+        self.k_scale = nn.Parameter(torch.ones(dim_head))
+
         self.to_out = nn.Linear(hidden_dim, dim, bias = False)
 
     def forward(self, x):
@@ -216,9 +223,12 @@ class Attention(nn.Module):
         qkv = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), qkv)
 
-        q = q * self.scale
+        q, k = map(l2norm, (q, k))
 
-        sim = einsum('b h i d, b h j d -> b h i j', q, k)
+        q = q * self.q_scale
+        k = k * self.k_scale
+
+        sim = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
         attn = sim.softmax(dim = -1)
         attn = self.attn_dropout(attn)
