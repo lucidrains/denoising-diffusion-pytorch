@@ -12,6 +12,8 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from torch.optim import Adam
+from lion_pytorch import Lion
+
 from torchvision import transforms as T, utils
 
 from einops import rearrange, reduce
@@ -812,6 +814,7 @@ class Trainer(object):
         results_folder = './results',
         amp = False,
         fp16 = False,
+        use_lion = False,
         split_batches = True,
         convert_image_to = None
     ):
@@ -846,7 +849,8 @@ class Trainer(object):
 
         # optimizer
 
-        self.opt = Adam(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
+        optim_klass = Lion if use_lion else Adam
+        self.opt = optim_klass(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
 
         # for logging results in a folder periodically
 
