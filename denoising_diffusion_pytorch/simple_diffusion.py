@@ -328,6 +328,7 @@ class UViT(nn.Module):
         init_img_transform: callable = None,
         final_img_itransform: callable = None,
         patch_size = 1,
+        dual_patchnorm = False
     ):
         super().__init__()
 
@@ -343,19 +344,30 @@ class UViT(nn.Module):
 
         input_channels = channels
 
+        init_dim = default(init_dim, dim)
+        self.init_conv = nn.Conv2d(input_channels, init_dim, 7, padding = 3)
+
         # whether to do initial patching, as alternative to dwt
 
-        self.patchify = self.unpatchify = identity
+        self.unpatchify = identity
 
-        if patch_size > 1:
-            input_channels = channels * (patch_size ** 2)
-            self.patchify = nn.Conv2d(channels, input_channels, patch_size, stride = patch_size)
+        input_channels = channels * (patch_size ** 2)
+        needs_patch = patch_size > 1
+
+        if needs_patch:
+            if not dual_patchnorm:
+                self.init_conv = nn.Conv2d(channels, init_dim, patch_size, stride = patch_size)
+            else:
+                self.init_conv = nn.Sequential(
+                    Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1 = patch_size, p2 = patch_size),
+                    LayerNorm(input_channels, normalize_dim = 1),
+                    nn.Conv2d(input_channels, init_dim, 1),
+                    LayerNorm(init_dim, normalize_dim = 1)
+                )
+
             self.unpatchify = nn.ConvTranspose2d(input_channels, channels, patch_size, stride = patch_size)
 
         # determine dimensions
-
-        init_dim = default(init_dim, dim)
-        self.init_conv = nn.Conv2d(input_channels, init_dim, 7, padding = 3)
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -427,7 +439,6 @@ class UViT(nn.Module):
 
     def forward(self, x, time):
         x = self.init_img_transform(x)
-        x = self.patchify(x)
 
         x = self.init_conv(x)
         r = x.clone()
