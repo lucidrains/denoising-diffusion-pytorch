@@ -20,8 +20,8 @@ setup(
     'accelerate',
     'einops',
     'ema-pytorch',
-    'lion-pytorch',
     'pillow',
+    'pytorch-fid',
     'torch',
     'torchvision',
     'tqdm'

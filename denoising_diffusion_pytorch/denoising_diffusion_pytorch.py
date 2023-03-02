@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from torch.optim import Adam
-from lion_pytorch import Lion
 
 from torchvision import transforms as T, utils
 
@@ -25,7 +24,6 @@ from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
-import numpy as np
 from pytorch_fid.inception import InceptionV3
 from pytorch_fid.fid_score import calculate_frechet_distance
 
@@ -464,6 +462,7 @@ class GaussianDiffusion(nn.Module):
         assert not model.random_or_learned_sinusoidal_cond
 
         self.model = model
+
         self.channels = self.model.channels
         self.self_condition = self.model.self_condition
 
@@ -818,12 +817,14 @@ class Trainer(object):
         results_folder = './results',
         amp = False,
         fp16 = False,
-        use_lion = False,
         split_batches = True,
         convert_image_to = None,
-        dims=2048
+        calculate_fid = True,
+        inception_block_idx = 2048
     ):
         super().__init__()
+
+        # accelerator
 
         self.accelerator = Accelerator(
             split_batches = split_batches,
@@ -832,11 +833,21 @@ class Trainer(object):
 
         self.accelerator.native_amp = amp
 
+        # model
+
         self.model = diffusion_model
 
         # InceptionV3 for fid-score computation
-        block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-        self.model_InceptionV3 = InceptionV3([block_idx])
+
+        self.inception_v3 = None
+
+        if calculate_fid:
+            assert inception_block_idx in InceptionV3.BLOCK_INDEX_BY_DIM
+            block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[inception_block_idx]
+            self.inception_v3 = InceptionV3([block_idx])
+            self.inception_v3.to(self.device)
+
+        # sampling and training hyperparameters
 
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
@@ -858,13 +869,13 @@ class Trainer(object):
 
         # optimizer
 
-        optim_klass = Lion if use_lion else Adam
-        self.opt = optim_klass(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
+        self.opt = Adam(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
 
         # for logging results in a folder periodically
 
         if self.accelerator.is_main_process:
             self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
+            self.ema.to(self.device)
 
         self.results_folder = Path(results_folder)
         self.results_folder.mkdir(exist_ok = True)
@@ -876,6 +887,10 @@ class Trainer(object):
         # prepare model, dataloader, optimizer with accelerator
 
         self.model, self.opt = self.accelerator.prepare(self.model, self.opt)
+
+    @property
+    def device(self):
+        return self.accelerator.device
 
     def save(self, milestone):
         if not self.accelerator.is_local_main_process:
@@ -911,17 +926,19 @@ class Trainer(object):
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
 
+    @torch.no_grad()
     def calculate_activation_statistics(self, samples):
-        with torch.no_grad():
-            features = self.model_InceptionV3(samples)[0]
-            features_np = features.squeeze(3).squeeze(2).cpu().numpy()
+        features = self.inception_v3(samples)[0]
+        features = rearrange(features, '... 1 1 -> ...')
 
-            mu = np.mean(features_np, axis=0)
-            sigma = np.cov(features_np, rowvar=False)
+        mu = torch.mean(features, dim = 0).cpu()
+        sigma = torch.cov(features).cpu()
         return mu, sigma
 
     def fid_score(self, real_samples, fake_samples):
-        assert real_samples.shape[0] == fake_samples.shape[0], "length of samples should be equal."
+        min_batch = min(real_samples.shape[0], fake_samples.shape[0])
+        real_samples, fake_samples = map(lambda t: t[:min_batch], (real_samples, fake_samples))
+
         m1, s1 = self.calculate_activation_statistics(real_samples)
         m2, s2 = self.calculate_activation_statistics(fake_samples)
 
@@ -960,12 +977,10 @@ class Trainer(object):
 
                 self.step += 1
                 if accelerator.is_main_process:
-                    self.ema.to(device)
                     self.ema.update()
 
                     if self.step != 0 and self.step % self.save_and_sample_every == 0:
                         self.ema.ema_model.eval()
-                        self.model_InceptionV3.to(device)
 
                         with torch.no_grad():
                             milestone = self.step // self.save_and_sample_every
@@ -973,10 +988,15 @@ class Trainer(object):
                             all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
 
                         all_images = torch.cat(all_images_list, dim = 0)
-                        fid_score = self.fid_score(real_samples=data[:self.num_samples], fake_samples=all_images)
-                        accelerator.print(f'fid_score is {fid_score}')
+
                         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
                         self.save(milestone)
+
+                        # whether to calculate fid
+
+                        if exists(self.inception_v3):
+                            fid_score = self.fid_score(real_samples = data, fake_samples = all_images)
+                            accelerator.print(f'fid_score: {fid_score}')
 
                 pbar.update(1)
 
