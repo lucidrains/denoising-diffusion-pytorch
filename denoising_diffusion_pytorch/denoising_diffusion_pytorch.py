@@ -25,6 +25,10 @@ from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
+import numpy as np
+from pytorch_fid.inception import InceptionV3
+from pytorch_fid.fid_score import calculate_frechet_distance
+
 from denoising_diffusion_pytorch.version import __version__
 
 # constants
@@ -816,7 +820,8 @@ class Trainer(object):
         fp16 = False,
         use_lion = False,
         split_batches = True,
-        convert_image_to = None
+        convert_image_to = None,
+        dims=2048
     ):
         super().__init__()
 
@@ -828,6 +833,10 @@ class Trainer(object):
         self.accelerator.native_amp = amp
 
         self.model = diffusion_model
+
+        # InceptionV3 for fid-score computation
+        block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+        self.model_InceptionV3 = InceptionV3([block_idx])
 
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
@@ -902,6 +911,23 @@ class Trainer(object):
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
 
+    def calculate_activation_statistics(self, samples):
+        with torch.no_grad():
+            features = self.model_InceptionV3(samples)[0]
+            features_np = features.squeeze(3).squeeze(2).cpu().numpy()
+
+            mu = np.mean(features_np, axis=0)
+            sigma = np.cov(features_np, rowvar=False)
+        return mu, sigma
+
+    def fid_score(self, real_samples, fake_samples):
+        assert real_samples.shape[0] == fake_samples.shape[0], "length of samples should be equal."
+        m1, s1 = self.calculate_activation_statistics(real_samples)
+        m2, s2 = self.calculate_activation_statistics(fake_samples)
+
+        fid_value = calculate_frechet_distance(m1, s1, m2, s2)
+        return fid_value
+
     def train(self):
         accelerator = self.accelerator
         device = accelerator.device
@@ -939,6 +965,7 @@ class Trainer(object):
 
                     if self.step != 0 and self.step % self.save_and_sample_every == 0:
                         self.ema.ema_model.eval()
+                        self.model_InceptionV3.to(device)
 
                         with torch.no_grad():
                             milestone = self.step // self.save_and_sample_every
@@ -946,6 +973,8 @@ class Trainer(object):
                             all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
 
                         all_images = torch.cat(all_images_list, dim = 0)
+                        fid_score = self.fid_score(real_samples=data[:self.num_samples], fake_samples=all_images)
+                        accelerator.print(f'fid_score is {fid_score}')
                         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
                         self.save(milestone)
 
