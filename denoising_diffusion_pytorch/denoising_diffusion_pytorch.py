@@ -15,7 +15,7 @@ from torch.optim import Adam
 
 from torchvision import transforms as T, utils
 
-from einops import rearrange, reduce
+from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange
 
 from PIL import Image
@@ -839,6 +839,7 @@ class Trainer(object):
         # model
 
         self.model = diffusion_model
+        self.channels = diffusion_model.channels
 
         # InceptionV3 for fid-score computation
 
@@ -932,6 +933,8 @@ class Trainer(object):
 
     @torch.no_grad()
     def calculate_activation_statistics(self, samples):
+        assert exists(self.inception_v3)
+
         features = self.inception_v3(samples)[0]
         features = rearrange(features, '... 1 1 -> ...')
 
@@ -940,6 +943,10 @@ class Trainer(object):
         return mu, sigma
 
     def fid_score(self, real_samples, fake_samples):
+
+        if self.channels == 1:
+            real_samples, fake_samples = map(lambda t: repeat(t, 'b 1 ... -> b c ...', c = 3), (real_samples, fake_samples))
+
         min_batch = min(real_samples.shape[0], fake_samples.shape[0])
         real_samples, fake_samples = map(lambda t: t[:min_batch], (real_samples, fake_samples))
 
