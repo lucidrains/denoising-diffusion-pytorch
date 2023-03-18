@@ -412,8 +412,6 @@ class GaussianDiffusion1D(nn.Module):
         loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'cosine',
-        p2_loss_weight_gamma = 0.,
-        p2_loss_weight_k = 1,
         ddim_sampling_eta = 0.,
         auto_normalize = True
     ):
@@ -481,9 +479,18 @@ class GaussianDiffusion1D(nn.Module):
         register_buffer('posterior_mean_coef1', betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         register_buffer('posterior_mean_coef2', (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
 
-        # calculate p2 reweighting
+        # calculate loss weight
 
-        register_buffer('p2_loss_weight', (p2_loss_weight_k + alphas_cumprod / (1 - alphas_cumprod)) ** -p2_loss_weight_gamma)
+        snr = alphas_cumprod / (1 - alphas_cumprod)
+
+        if objective == 'pred_noise':
+            loss_weight = torch.ones_like(snr)
+        elif objective == 'pred_x0':
+            loss_weight = snr
+        elif objective == 'pred_v':
+            loss_weight = snr / (snr + 1)
+
+        register_buffer('loss_weight', loss_weight)
 
         # whether to autonormalize
 
@@ -696,7 +703,7 @@ class GaussianDiffusion1D(nn.Module):
         loss = self.loss_fn(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
-        loss = loss * extract(self.p2_loss_weight, t, loss.shape)
+        loss = loss * extract(self.loss_weight, t, loss.shape)
         return loss.mean()
 
     def forward(self, img, *args, **kwargs):

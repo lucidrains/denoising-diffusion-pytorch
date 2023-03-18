@@ -122,8 +122,8 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         clip_sample_denoised = True,
         learned_schedule_net_hidden_dim = 1024,
         learned_noise_schedule_frac_gradient = 1.,   # between 0 and 1, determines what percentage of gradients go back, so one can update the learned noise schedule more slowly
-        p2_loss_weight_gamma = 0.,                   # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time
-        p2_loss_weight_k = 1
+        min_snr_loss_weight = False,
+        min_snr_gamma = 5
     ):
         super().__init__()
         assert model.random_or_learned_sinusoidal_cond
@@ -161,13 +161,10 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         self.num_sample_steps = num_sample_steps
         self.clip_sample_denoised = clip_sample_denoised
 
-        # p2 loss weight
-        # proposed https://arxiv.org/abs/2204.00227
+        # proposed https://arxiv.org/abs/2303.09556
 
-        assert p2_loss_weight_gamma <= 2, 'in paper, they noticed any gamma greater than 2 is harmful'
-
-        self.p2_loss_weight_gamma = p2_loss_weight_gamma  # recommended to be 0.5 or 1
-        self.p2_loss_weight_k = p2_loss_weight_k
+        self.min_snr_loss_weight = min_snr_loss_weight
+        self.min_snr_gamma = min_snr_gamma
 
     @property
     def device(self):
@@ -272,9 +269,9 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         losses = self.loss_fn(model_out, noise, reduction = 'none')
         losses = reduce(losses, 'b ... -> b', 'mean')
 
-        if self.p2_loss_weight_gamma >= 0:
-            # following eq 8. in https://arxiv.org/abs/2204.00227
-            loss_weight = (self.p2_loss_weight_k + log_snr.exp()) ** -self.p2_loss_weight_gamma
+        if self.min_snr_loss_weight:
+            snr = log_snr.exp()
+            loss_weight = snr.clamp(min = self.min_snr_gamma) / snr
             losses = losses * loss_weight
 
         return losses.mean()
