@@ -180,16 +180,6 @@ sampled_seq.shape # (4, 32, 128)
 ```
 
 ```bibtex
-@article{Choi2022PerceptionPT,
-    title   = {Perception Prioritized Training of Diffusion Models},
-    author  = {Jooyoung Choi and Jungbeom Lee and Chaehun Shin and Sungwon Kim and Hyunwoo J. Kim and Sung-Hoon Yoon},
-    journal = {ArXiv},
-    year    = {2022},
-    volume  = {abs/2204.00227}
-}
-```
-
-```bibtex
 @article{Karras2022ElucidatingTD,
     title   = {Elucidating the Design Space of Diffusion-Based Generative Models},
     author  = {Tero Karras and Miika Aittala and Timo Aila and Samuli Laine},
@@ -295,5 +285,13 @@ sampled_seq.shape # (4, 32, 128)
     publisher = {arXiv},
     year    = {2023},
     copyright = {Creative Commons Attribution 4.0 International}
+}
+```
+
+```bibtex
+@inproceedings{Hang2023EfficientDT,
+    title   = {Efficient Diffusion Training via Min-SNR Weighting Strategy},
+    author  = {Tiankai Hang and Shuyang Gu and Chen Li and Jianmin Bao and Dong Chen and Han Hu and Xin Geng and Baining Guo},
+    year    = {2023}
 }
 ```
