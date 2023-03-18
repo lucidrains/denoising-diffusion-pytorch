@@ -546,6 +546,8 @@ class GaussianDiffusion(nn.Module):
         noise_d_high = None,
         num_sample_steps = 500,
         clip_sample_denoised = True,
+        min_snr_loss_weight = True,
+        min_snr_gamma = 5
     ):
         super().__init__()
         assert pred_objective in {'v', 'eps'}, 'whether to predict v-space (progressive distillation paper) or noise'
@@ -581,6 +583,11 @@ class GaussianDiffusion(nn.Module):
 
         self.num_sample_steps = num_sample_steps
         self.clip_sample_denoised = clip_sample_denoised
+
+        # loss weight
+
+        self.min_snr_loss_weight = min_snr_loss_weight
+        self.min_snr_gamma = min_snr_gamma
 
     @property
     def device(self):
@@ -675,7 +682,23 @@ class GaussianDiffusion(nn.Module):
         elif self.pred_objective == 'eps':
             target = noise
 
-        return F.mse_loss(model_out, target)
+        loss = F.mse_loss(model_out, target, reduction = 'none')
+
+        loss = reduce(loss, 'b ... -> b', 'mean')
+
+        snr = log_snr.exp()
+
+        maybe_clip_snr = snr.clone()
+        if self.min_snr_loss_weight:
+            maybe_clip_snr.clamp_(min = self.min_snr_gamma)
+
+        if self.pred_objective == 'v':
+            loss_weight = maybe_clip_snr / (snr + 1)
+
+        elif self.pred_objective == 'eps':
+            loss_weight = maybe_clip_snr / snr
+
+        return (loss * loss_weight).mean()
 
     def forward(self, img, *args, **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
