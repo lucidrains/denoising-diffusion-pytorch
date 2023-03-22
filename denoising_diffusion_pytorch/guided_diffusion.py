@@ -532,7 +532,7 @@ class GaussianDiffusion(nn.Module):
 
         maybe_clipped_snr = snr.clone()
         if min_snr_loss_weight:
-            maybe_clipped_snr.clamp_(min = min_snr_gamma)
+            maybe_clipped_snr.clamp_(max = min_snr_gamma)
 
         if objective == 'pred_noise':
             loss_weight = maybe_clipped_snr / snr

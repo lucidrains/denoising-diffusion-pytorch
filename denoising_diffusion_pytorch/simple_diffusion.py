@@ -690,7 +690,7 @@ class GaussianDiffusion(nn.Module):
 
         maybe_clip_snr = snr.clone()
         if self.min_snr_loss_weight:
-            maybe_clip_snr.clamp_(min = self.min_snr_gamma)
+            maybe_clip_snr.clamp_(max = self.min_snr_gamma)
 
         if self.pred_objective == 'v':
             loss_weight = maybe_clip_snr / (snr + 1)
