@@ -35,6 +35,11 @@ ModelPrediction =  namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
 
 # helpers functions
 
+def convert_to_rgb(image):
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    return image
+    
 def exists(x):
     return x is not None
 
@@ -798,6 +803,7 @@ class Dataset(Dataset):
         maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else nn.Identity()
 
         self.transform = T.Compose([
+            T.Lambda(lambda image: convert_to_rgb(image) if image.mode != 'RGB' else image),
             T.Lambda(maybe_convert_fn),
             T.Resize(image_size),
             T.RandomHorizontalFlip() if augment_horizontal_flip else nn.Identity(),
