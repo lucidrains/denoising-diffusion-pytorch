@@ -377,7 +377,7 @@ class Unet(nn.Module):
         cond_scale = 1.,
         **kwargs
     ):
-        logits = self.forward(*args, **kwargs)
+        logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
 
         if cond_scale == 1:
             return logits
