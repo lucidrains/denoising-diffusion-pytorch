@@ -106,11 +106,10 @@ $ accelerate launch train.py
 
 ### 1D Sequence
 
-By popular request, a 1D Unet + Gaussian Diffusion implementation. You will have to do the training code yourself
-
+By popular request, a 1D Unet + Gaussian Diffusion implementation.
 ```python
 import torch
-from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D
+from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D, Trainer1D
 
 model = Unet1D(
     dim = 64,
@@ -125,16 +124,33 @@ diffusion = GaussianDiffusion1D(
     objective = 'pred_v'
 )
 
-training_seq = torch.rand(8, 32, 128) # features are normalized from 0 to 1
+training_seq = torch.rand(64, 32, 128) # features are normalized from 0 to 1
 loss = diffusion(training_seq)
 loss.backward()
+
+# Or using trainer
+
+trainer = Trainer1D(
+    diffusion,
+    dataset = training_seq,
+    train_batch_size = 32,
+    train_lr = 8e-5,
+    train_num_steps = 700000,         # total training steps
+    gradient_accumulate_every = 2,    # gradient accumulation steps
+    ema_decay = 0.995,                # exponential moving average decay
+    amp = True,                       # turn on mixed precision
+)
+trainer.train()
 
 # after a lot of training
 
 sampled_seq = diffusion.sample(batch_size = 4)
 sampled_seq.shape # (4, 32, 128)
-```
 
+```
+`Trainer1D` does not evaluate the generated samples in any way since the type of data is not known. 
+You could consider adding a suitable metric to the training loop yourself after doing an editable install of this package
+`pip install -e .`.
 ## Citations
 
 ```bibtex
