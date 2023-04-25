@@ -81,9 +81,11 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         self.vb_loss_weight = vb_loss_weight
 
-    def model_predictions(self, x, t):
+    def model_predictions(self, x, t, clip_x_start = False):
         model_output = self.model(x, t)
         model_output, pred_variance = model_output.chunk(2, dim = 1)
+
+        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
             pred_noise = model_output
@@ -93,9 +95,11 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
             pred_noise = self.predict_noise_from_start(x, t, model_output)
             x_start = model_output
 
+        x_start = maybe_clip(x_start)
+
         return ModelPrediction(pred_noise, x_start, pred_variance)
 
-    def p_mean_variance(self, *, x, t, clip_denoised, model_output = None):
+    def p_mean_variance(self, *, x, t, clip_denoised, model_output = None, **kwargs):
         model_output = default(model_output, lambda: self.model(x, t))
         pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
 
@@ -113,7 +117,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         model_mean, _, _ = self.q_posterior(x_start, x, t)
 
-        return model_mean, model_variance, model_log_variance
+        return model_mean, model_variance, model_log_variance, x_start
 
     def p_losses(self, x_start, t, noise = None, clip_denoised = False):
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -126,7 +130,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         # calculating kl loss for learned variance (interpolation)
 
         true_mean, _, true_log_variance_clipped = self.q_posterior(x_start = x_start, x_t = x_t, t = t)
-        model_mean, _, model_log_variance = self.p_mean_variance(x = x_t, t = t, clip_denoised = clip_denoised, model_output = model_output)
+        model_mean, _, model_log_variance, _ = self.p_mean_variance(x = x_t, t = t, clip_denoised = clip_denoised, model_output = model_output)
 
         # kl loss with detached model predicted mean, for stability reasons as in paper
 
