@@ -24,6 +24,7 @@ from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
+import numpy as np
 from pytorch_fid.inception import InceptionV3
 from pytorch_fid.fid_score import calculate_frechet_distance
 
@@ -950,10 +951,10 @@ class Trainer(object):
         assert exists(self.inception_v3)
 
         features = self.inception_v3(samples)[0]
-        features = rearrange(features, '... 1 1 -> ...')
+        features = rearrange(features, '... 1 1 -> ...').cpu().numpy()
 
-        mu = torch.mean(features, dim = 0).cpu()
-        sigma = torch.cov(rearrange(features, '... i j -> ... j i')).cpu()
+        mu = np.mean(features, axis = 0)
+        sigma = np.cov(features, rowvar = False)
         return mu, sigma
 
     def fid_score(self, real_samples, fake_samples):

@@ -20,6 +20,7 @@ setup(
     'accelerate',
     'einops',
     'ema-pytorch',
+    'numpy',
     'pillow',
     'pytorch-fid',
     'torch',
