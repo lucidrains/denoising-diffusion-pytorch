@@ -375,6 +375,7 @@ class Unet(nn.Module):
         self,
         *args,
         cond_scale = 1.,
+        rescaled_phi = 0.,
         **kwargs
     ):
         logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
@@ -383,7 +384,15 @@ class Unet(nn.Module):
             return logits
 
         null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
-        return null_logits + (logits - null_logits) * cond_scale
+        scaled_logits = null_logits + (logits - null_logits) * cond_scale
+
+        if rescaled_phi == 0.:
+            return scaled_logits
+
+        std_fn = partial(torch.std, dim = tuple(range(1, scaled_logits.ndim)), keepdim = True)
+        rescaled_logits = scaled_logits * (std_fn(logits) / std_fn(scaled_logits))
+
+        return rescaled_logits * rescaled_phi + scaled_logits * (1. - rescaled_phi)
 
     def forward(
         self,
@@ -483,10 +492,10 @@ class GaussianDiffusion(nn.Module):
         image_size,
         timesteps = 1000,
         sampling_timesteps = None,
-        loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'cosine',
         ddim_sampling_eta = 1.,
+        offset_noise_strength = 0.,
         min_snr_loss_weight = False,
         min_snr_gamma = 5
     ):
@@ -516,7 +525,6 @@ class GaussianDiffusion(nn.Module):
 
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
-        self.loss_type = loss_type
 
         # sampling related parameters
 
@@ -555,6 +563,10 @@ class GaussianDiffusion(nn.Module):
         register_buffer('posterior_log_variance_clipped', torch.log(posterior_variance.clamp(min =1e-20)))
         register_buffer('posterior_mean_coef1', betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         register_buffer('posterior_mean_coef2', (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
+
+        # offset noise strength - 0.1 was claimed ideal
+
+        self.offset_noise_strength = offset_noise_strength
 
         # loss weight
 
@@ -606,8 +618,8 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def model_predictions(self, x, t, classes, cond_scale = 3., clip_x_start = False):
-        model_output = self.model.forward_with_cond_scale(x, t, classes, cond_scale = cond_scale)
+    def model_predictions(self, x, t, classes, cond_scale = 6., rescaled_phi = 0.7, clip_x_start = False):
+        model_output = self.model.forward_with_cond_scale(x, t, classes, cond_scale = cond_scale, rescaled_phi = rescaled_phi)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
@@ -628,8 +640,8 @@ class GaussianDiffusion(nn.Module):
 
         return ModelPrediction(pred_noise, x_start)
 
-    def p_mean_variance(self, x, t, classes, cond_scale, clip_denoised = True):
-        preds = self.model_predictions(x, t, classes, cond_scale)
+    def p_mean_variance(self, x, t, classes, cond_scale, rescaled_phi, clip_denoised = True):
+        preds = self.model_predictions(x, t, classes, cond_scale, rescaled_phi)
         x_start = preds.pred_x_start
 
         if clip_denoised:
@@ -639,16 +651,16 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance, x_start
 
     @torch.no_grad()
-    def p_sample(self, x, t: int, classes, cond_scale = 3., clip_denoised = True):
+    def p_sample(self, x, t: int, classes, cond_scale = 6., rescaled_phi = 0.7, clip_denoised = True):
         b, *_, device = *x.shape, x.device
         batched_times = torch.full((x.shape[0],), t, device = x.device, dtype = torch.long)
-        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, classes = classes, cond_scale = cond_scale, clip_denoised = clip_denoised)
+        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, classes = classes, cond_scale = cond_scale, rescaled_phi = rescaled_phi, clip_denoised = clip_denoised)
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
 
     @torch.no_grad()
-    def p_sample_loop(self, classes, shape, cond_scale = 3.):
+    def p_sample_loop(self, classes, shape, cond_scale = 6., rescaled_phi = 0.7):
         batch, device = shape[0], self.betas.device
 
         img = torch.randn(shape, device=device)
@@ -656,13 +668,13 @@ class GaussianDiffusion(nn.Module):
         x_start = None
 
         for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', total = self.num_timesteps):
-            img, x_start = self.p_sample(img, t, classes, cond_scale)
+            img, x_start = self.p_sample(img, t, classes, cond_scale, rescaled_phi)
 
         img = unnormalize_to_zero_to_one(img)
         return img
 
     @torch.no_grad()
-    def ddim_sample(self, classes, shape, cond_scale = 3., clip_denoised = True):
+    def ddim_sample(self, classes, shape, cond_scale = 6., rescaled_phi = 0.7, clip_denoised = True):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
@@ -697,10 +709,10 @@ class GaussianDiffusion(nn.Module):
         return img
 
     @torch.no_grad()
-    def sample(self, classes, cond_scale = 3.):
+    def sample(self, classes, cond_scale = 6., rescaled_phi = 0.7):
         batch_size, image_size, channels = classes.shape[0], self.image_size, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn(classes, (batch_size, channels, image_size, image_size), cond_scale)
+        return sample_fn(classes, (batch_size, channels, image_size, image_size), cond_scale, rescaled_phi)
 
     @torch.no_grad()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
@@ -721,19 +733,14 @@ class GaussianDiffusion(nn.Module):
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
+        if self.offset_noise_strength > 0.:
+            offset_noise = torch.randn(x_start.shape[:2], device = self.device)
+            noise += self.offset_noise_strength * rearrange(offset_noise, 'b c -> b c 1 1')
+
         return (
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
-
-    @property
-    def loss_fn(self):
-        if self.loss_type == 'l1':
-            return F.l1_loss
-        elif self.loss_type == 'l2':
-            return F.mse_loss
-        else:
-            raise ValueError(f'invalid loss type {self.loss_type}')
 
     def p_losses(self, x_start, t, *, classes, noise = None):
         b, c, h, w = x_start.shape
@@ -757,7 +764,7 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = self.loss_fn(model_out, target, reduction = 'none')
+        loss = F.mse_loss(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
@@ -799,7 +806,7 @@ if __name__ == '__main__':
 
     sampled_images = diffusion.sample(
         classes = image_classes,
-        cond_scale = 3.                # condition scaling, anything greater than 1 strengthens the classifier free guidance. reportedly 3-8 is good empirically
+        cond_scale = 6.                # condition scaling, anything greater than 1 strengthens the classifier free guidance. reportedly 3-8 is good empirically
     )
 
     sampled_images.shape # (8, 3, 128, 128)

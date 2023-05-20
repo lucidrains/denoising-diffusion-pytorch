@@ -38,8 +38,7 @@ model = Unet(
 diffusion = GaussianDiffusion(
     model,
     image_size = 128,
-    timesteps = 1000,   # number of steps
-    loss_type = 'l1'    # L1 or L2
+    timesteps = 1000    # number of steps
 )
 
 training_images = torch.rand(8, 3, 128, 128) # images are normalized from 0 to 1
@@ -65,8 +64,7 @@ diffusion = GaussianDiffusion(
     model,
     image_size = 128,
     timesteps = 1000,           # number of steps
-    sampling_timesteps = 250,   # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
-    loss_type = 'l1'            # L1 or L2
+    sampling_timesteps = 250    # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
 )
 
 trainer = Trainer(
@@ -308,6 +306,21 @@ You could consider adding a suitable metric to the training loop yourself after 
 @inproceedings{Hang2023EfficientDT,
     title   = {Efficient Diffusion Training via Min-SNR Weighting Strategy},
     author  = {Tiankai Hang and Shuyang Gu and Chen Li and Jianmin Bao and Dong Chen and Han Hu and Xin Geng and Baining Guo},
+    year    = {2023}
+}
+```
+
+```bibtex
+@misc{Guttenberg2023,
+    author  = {Nicholas Guttenberg},
+    url     = {https://www.crosslabs.org/blog/diffusion-with-offset-noise}
+}
+```
+
+```bibtex
+@inproceedings{Lin2023CommonDN,
+    title   = {Common Diffusion Noise Schedules and Sample Steps are Flawed},
+    author  = {Shanchuan Lin and Bingchen Liu and Jiashi Li and Xiao Yang},
     year    = {2023}
 }
 ```

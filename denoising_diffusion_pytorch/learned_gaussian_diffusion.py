@@ -150,6 +150,6 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         pred_noise, _ = model_output.chunk(2, dim = 1)
 
-        simple_losses = self.loss_fn(pred_noise, noise)
+        simple_losses = F.mse_loss(pred_noise, noise)
 
         return simple_losses + vb_losses.mean() * self.vb_loss_weight

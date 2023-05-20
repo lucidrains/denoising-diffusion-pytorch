@@ -446,7 +446,6 @@ class GaussianDiffusion(nn.Module):
         image_size,
         timesteps = 1000,
         sampling_timesteps = None,
-        loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'sigmoid',
         schedule_fn_kwargs = dict(),
@@ -486,7 +485,6 @@ class GaussianDiffusion(nn.Module):
 
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
-        self.loss_type = loss_type
 
         # sampling related parameters
 
@@ -737,15 +735,6 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    @property
-    def loss_fn(self):
-        if self.loss_type == 'l1':
-            return F.l1_loss
-        elif self.loss_type == 'l2':
-            return F.mse_loss
-        else:
-            raise ValueError(f'invalid loss type {self.loss_type}')
-
     def p_losses(self, x_start, t, noise = None):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -778,7 +767,7 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = self.loss_fn(model_out, target, reduction = 'none')
+        loss = F.mse_loss(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
@@ -1028,8 +1017,7 @@ if __name__ == '__main__':
     diffusion = GaussianDiffusion(
         model,
         image_size = image_size,
-        timesteps = 1000,   # number of steps
-        loss_type = 'l1'    # L1 or L2
+        timesteps = 1000   # number of steps
     )
 
     classifier = Classifier(image_size=image_size, num_classes=1000, t_dim=1)
