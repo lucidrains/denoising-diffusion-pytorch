@@ -311,3 +311,11 @@ You could consider adding a suitable metric to the training loop yourself after 
     year    = {2023}
 }
 ```
+
+```bibtex
+@inproceedings{Lin2023CommonDN,
+    title   = {Common Diffusion Noise Schedules and Sample Steps are Flawed},
+    author  = {Shanchuan Lin and Bingchen Liu and Jiashi Li and Xiao Yang},
+    year    = {2023}
+}
+```
