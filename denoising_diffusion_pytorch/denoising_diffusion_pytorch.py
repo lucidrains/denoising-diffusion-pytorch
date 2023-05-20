@@ -2,7 +2,7 @@ import math
 import copy
 from pathlib import Path
 from random import random
-from functools import partial
+from functools import partial, wraps
 from collections import namedtuple
 from multiprocessing import cpu_count
 
@@ -67,6 +67,11 @@ def convert_image_to_fn(img_type, image):
     if image.mode != img_type:
         return image.convert(img_type)
     return image
+
+def extract(a, t, x_shape):
+    b, *_ = t.shape
+    out = a.gather(-1, t)
+    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 # normalization functions
 
@@ -398,13 +403,35 @@ class Unet(nn.Module):
         x = self.final_res_block(x, t)
         return self.final_conv(x)
 
-# gaussian diffusion trainer class
+# scheduling functions
 
-def extract(a, t, x_shape):
-    b, *_ = t.shape
-    out = a.gather(-1, t)
-    return out.reshape(b, *((1,) * (len(x_shape) - 1)))
+def enforce_zero_terminal_snr(schedule_fn):
+    # algorithm 1 in https://arxiv.org/abs/2305.08891
 
+    @wraps(schedule_fn)
+    def inner(*args, **kwargs):
+        betas = schedule_fn(*args, **kwargs)
+        alphas = 1. - betas
+
+        alphas_cumprod = torch.cumprod(alphas, dim = 0)
+        alphas_cumprod = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
+
+        alphas_cumprod_sqrt = torch.sqrt(alphas_cumprod)
+
+        terminal_snr = alphas_cumprod_sqrt[-1].clone()
+
+        alphas_cumprod_sqrt -= terminal_snr # enforce zero terminal snr
+        alphas_cumprod_sqrt *= 1. / (1. - terminal_snr)
+
+        alphas_cumprod = alphas_cumprod_sqrt ** 2
+        alphas = alphas_cumprod[1:] / alphas_cumprod[:-1]
+        betas = 1. - alphas
+
+        return betas
+
+    return inner
+
+@enforce_zero_terminal_snr
 def linear_beta_schedule(timesteps):
     """
     linear schedule, proposed in original ddpm paper
@@ -426,6 +453,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 1.)
 
+@enforce_zero_terminal_snr
 def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1e-5):
     """
     sigmoid schedule
@@ -441,6 +469,8 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 1.)
 
+# gaussian diffusion trainer class
+
 class GaussianDiffusion(nn.Module):
     def __init__(
         self,
@@ -449,7 +479,6 @@ class GaussianDiffusion(nn.Module):
         image_size,
         timesteps = 1000,
         sampling_timesteps = None,
-        loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'sigmoid',
         schedule_fn_kwargs = dict(),
@@ -473,7 +502,9 @@ class GaussianDiffusion(nn.Module):
 
         assert objective in {'pred_noise', 'pred_x0', 'pred_v'}, 'objective must be either pred_noise (predict noise) or pred_x0 (predict image start) or pred_v (predict v [v-parameterization as defined in appendix D of progressive distillation paper, used in imagen-video successfully])'
 
-        if beta_schedule == 'linear':
+        if callable(beta_schedule):
+            beta_schedule_fn = beta_schedule
+        elif beta_schedule == 'linear':
             beta_schedule_fn = linear_beta_schedule
         elif beta_schedule == 'cosine':
             beta_schedule_fn = cosine_beta_schedule
@@ -485,12 +516,11 @@ class GaussianDiffusion(nn.Module):
         betas = beta_schedule_fn(timesteps, **schedule_fn_kwargs)
 
         alphas = 1. - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        alphas_cumprod = torch.cumprod(alphas, dim = 0)
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
 
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
-        self.loss_type = loss_type
 
         # sampling related parameters
 
@@ -511,6 +541,10 @@ class GaussianDiffusion(nn.Module):
         # calculations for diffusion q(x_t | x_{t-1}) and others
 
         register_buffer('sqrt_alphas_cumprod', torch.sqrt(alphas_cumprod))
+
+        terminal_snr = self.sqrt_alphas_cumprod[-1]
+        assert terminal_snr == 0, f'non-zero terminal SNR detected ({terminal_snr:.6f}), from https://arxiv.org/abs/2305.08891 paper - you can wrap your schedule function with `enforce_zero_terminal_snr` decorator'
+
         register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - alphas_cumprod))
         register_buffer('log_one_minus_alphas_cumprod', torch.log(1. - alphas_cumprod))
         register_buffer('sqrt_recip_alphas_cumprod', torch.sqrt(1. / alphas_cumprod))
@@ -725,15 +759,6 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    @property
-    def loss_fn(self):
-        if self.loss_type == 'l1':
-            return F.l1_loss
-        elif self.loss_type == 'l2':
-            return F.mse_loss
-        else:
-            raise ValueError(f'invalid loss type {self.loss_type}')
-
     def p_losses(self, x_start, t, noise = None):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -766,7 +791,7 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = self.loss_fn(model_out, target, reduction = 'none')
+        loss = F.mse_loss(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)

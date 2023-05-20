@@ -66,8 +66,8 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         # get loss for predicted noise and x_start
         # with the loss weight given at initialization
 
-        noise_loss = self.loss_fn(noise, pred_noise) * self.pred_noise_loss_weight
-        x_start_loss = self.loss_fn(x_start, pred_x_start) * self.pred_x_start_loss_weight
+        noise_loss = F.mse_loss(noise, pred_noise) * self.pred_noise_loss_weight
+        x_start_loss = F.mse_loss(x_start, pred_x_start) * self.pred_x_start_loss_weight
 
         # calculate x_start from predicted noise
         # then do a weighted sum of the x_start prediction, weights also predicted by the model (softmax normalized)
@@ -78,5 +78,5 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
 
         # main loss to x_start with the weighted one
 
-        weighted_x_start_loss = self.loss_fn(x_start, weighted_x_start)
+        weighted_x_start_loss = F.mse_loss(x_start, weighted_x_start)
         return weighted_x_start_loss + x_start_loss + noise_loss
