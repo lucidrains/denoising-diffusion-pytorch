@@ -417,6 +417,7 @@ class GaussianDiffusion1D(nn.Module):
         seq_length,
         timesteps = 1000,
         sampling_timesteps = None,
+        loss_type = 'l1',
         objective = 'pred_noise',
         beta_schedule = 'cosine',
         ddim_sampling_eta = 0.,
@@ -446,6 +447,7 @@ class GaussianDiffusion1D(nn.Module):
 
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
+        self.loss_type = loss_type
 
         # sampling related parameters
 
@@ -665,6 +667,15 @@ class GaussianDiffusion1D(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
+    @property
+    def loss_fn(self):
+        if self.loss_type == 'l1':
+            return F.l1_loss
+        elif self.loss_type == 'l2':
+            return F.mse_loss
+        else:
+            raise ValueError(f'invalid loss type {self.loss_type}')
+
     def p_losses(self, x_start, t, noise = None):
         b, c, n = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -697,7 +708,7 @@ class GaussianDiffusion1D(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = F.mse_loss(model_out, target, reduction = 'none')
+        loss = self.loss_fn(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)

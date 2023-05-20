@@ -38,7 +38,8 @@ model = Unet(
 diffusion = GaussianDiffusion(
     model,
     image_size = 128,
-    timesteps = 1000    # number of steps
+    timesteps = 1000,   # number of steps
+    loss_type = 'l1'    # L1 or L2
 )
 
 training_images = torch.rand(8, 3, 128, 128) # images are normalized from 0 to 1
@@ -64,7 +65,8 @@ diffusion = GaussianDiffusion(
     model,
     image_size = 128,
     timesteps = 1000,           # number of steps
-    sampling_timesteps = 250    # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
+    sampling_timesteps = 250,   # number of sampling timesteps (using ddim for faster inference [see citation for ddim paper])
+    loss_type = 'l1'            # L1 or L2
 )
 
 trainer = Trainer(
@@ -146,11 +148,9 @@ sampled_seq = diffusion.sample(batch_size = 4)
 sampled_seq.shape # (4, 32, 128)
 
 ```
-
 `Trainer1D` does not evaluate the generated samples in any way since the type of data is not known. 
 You could consider adding a suitable metric to the training loop yourself after doing an editable install of this package
 `pip install -e .`.
-
 ## Citations
 
 ```bibtex

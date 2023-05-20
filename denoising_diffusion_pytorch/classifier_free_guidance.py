@@ -2,7 +2,7 @@ import math
 import copy
 from pathlib import Path
 from random import random
-from functools import partial, wraps
+from functools import partial
 from collections import namedtuple
 from multiprocessing import cpu_count
 
@@ -375,7 +375,6 @@ class Unet(nn.Module):
         self,
         *args,
         cond_scale = 1.,
-        rescale_phi = 0.,
         **kwargs
     ):
         logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
@@ -384,18 +383,7 @@ class Unet(nn.Module):
             return logits
 
         null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
-        scaled_logits = null_logits + (logits - null_logits) * cond_scale
-
-        if rescale_phi <= 0:
-            return scaled_logits
-
-        # rescaling proposed in https://arxiv.org/abs/2305.08891 to prevent over-saturation
-        # works for both pixel and latent space, as opposed to only pixel space with the technique from Imagen
-        # they found 0.7 to work well empirically with a conditional scale of 6.
-
-        std_fn = partial(torch.std, dim = tuple(range(1, scaled_logits.ndim)), keepdim = True)
-        rescaled_logits = scaled_logits * (std_fn(logits) / std_fn(scaled_logits))
-        return rescaled_logits * rescale_phi + (1 - rescale_phi) * scaled_logits
+        return null_logits + (logits - null_logits) * cond_scale
 
     def forward(
         self,
@@ -469,33 +457,6 @@ def extract(a, t, x_shape):
     out = a.gather(-1, t)
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
-def enforce_zero_terminal_snr(schedule_fn):
-    # algorithm 1 in https://arxiv.org/abs/2305.08891
-
-    @wraps(schedule_fn)
-    def inner(*args, **kwargs):
-        betas = schedule_fn(*args, **kwargs)
-        alphas = 1. - betas
-
-        alphas_cumprod = torch.cumprod(alphas, dim = 0)
-        alphas_cumprod = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)
-
-        alphas_cumprod_sqrt = torch.sqrt(alphas_cumprod)
-
-        terminal_snr = alphas_cumprod_sqrt[-1].clone()
-
-        alphas_cumprod_sqrt -= terminal_snr # enforce zero terminal snr
-        alphas_cumprod_sqrt *= 1. / (1. - terminal_snr)
-
-        alphas_cumprod = alphas_cumprod_sqrt ** 2
-        alphas = alphas_cumprod[1:] / alphas_cumprod[:-1]
-        betas = 1. - alphas
-
-        return betas
-
-    return inner
-
-@enforce_zero_terminal_snr
 def linear_beta_schedule(timesteps):
     scale = 1000 / timesteps
     beta_start = scale * 0.0001
@@ -512,7 +473,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     alphas_cumprod = torch.cos(((x / timesteps) + s) / (1 + s) * math.pi * 0.5) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-    return torch.clip(betas, 0, 1.)
+    return torch.clip(betas, 0, 0.999)
 
 class GaussianDiffusion(nn.Module):
     def __init__(
@@ -645,8 +606,8 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def model_predictions(self, x, t, classes, cond_scale = 6., rescale_phi = 0.7, clip_x_start = False):
-        model_output = self.model.forward_with_cond_scale(x, t, classes, cond_scale = cond_scale, rescale_phi = rescale_phi)
+    def model_predictions(self, x, t, classes, cond_scale = 3., clip_x_start = False):
+        model_output = self.model.forward_with_cond_scale(x, t, classes, cond_scale = cond_scale)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
@@ -678,7 +639,7 @@ class GaussianDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance, x_start
 
     @torch.no_grad()
-    def p_sample(self, x, t: int, classes, cond_scale = 6., rescale_phi = 0.7, clip_denoised = True):
+    def p_sample(self, x, t: int, classes, cond_scale = 3., clip_denoised = True):
         b, *_, device = *x.shape, x.device
         batched_times = torch.full((x.shape[0],), t, device = x.device, dtype = torch.long)
         model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, classes = classes, cond_scale = cond_scale, clip_denoised = clip_denoised)
@@ -687,7 +648,7 @@ class GaussianDiffusion(nn.Module):
         return pred_img, x_start
 
     @torch.no_grad()
-    def p_sample_loop(self, classes, shape, cond_scale = 6., rescale_phi = 0.7):
+    def p_sample_loop(self, classes, shape, cond_scale = 3.):
         batch, device = shape[0], self.betas.device
 
         img = torch.randn(shape, device=device)
@@ -701,7 +662,7 @@ class GaussianDiffusion(nn.Module):
         return img
 
     @torch.no_grad()
-    def ddim_sample(self, classes, shape, cond_scale = 6., rescale_phi = 0.7, clip_denoised = True):
+    def ddim_sample(self, classes, shape, cond_scale = 3., clip_denoised = True):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
@@ -765,6 +726,15 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
+    @property
+    def loss_fn(self):
+        if self.loss_type == 'l1':
+            return F.l1_loss
+        elif self.loss_type == 'l2':
+            return F.mse_loss
+        else:
+            raise ValueError(f'invalid loss type {self.loss_type}')
+
     def p_losses(self, x_start, t, *, classes, noise = None):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -787,7 +757,7 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown objective {self.objective}')
 
-        loss = F.mse_loss(model_out, target, reduction = 'none')
+        loss = self.loss_fn(model_out, target, reduction = 'none')
         loss = reduce(loss, 'b ... -> b (...)', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
