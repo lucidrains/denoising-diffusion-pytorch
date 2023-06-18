@@ -149,6 +149,11 @@ sampled_seq.shape # (4, 32, 128)
 `Trainer1D` does not evaluate the generated samples in any way since the type of data is not known. 
 You could consider adding a suitable metric to the training loop yourself after doing an editable install of this package
 `pip install -e .`.
+
+## Todo
+
+- [ ] add flash attention, do full attention at 64x64, linear attention at anything above
+
 ## Citations
 
 ```bibtex
