@@ -42,9 +42,9 @@ class FIDEvaluation():
         return features
 
     def load_or_precalc_dataset_stats(self):
-        path = os.path.join(self.stats_dir, "dataset_stats.pkl")
+        path = os.path.join(self.stats_dir, "dataset_stats")
         try:
-            ckpt = np.load(path)
+            ckpt = np.load(path + ".npz")
             self.m2, self.s2 = ckpt["m2"], ckpt["s2"]
             self.print_fn("Dataset stats loaded from disk.")
         except FileNotFoundError:
