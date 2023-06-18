@@ -53,7 +53,7 @@ class FIDEvaluation():
             self.print_fn(
                 f"Stacking Inception features for {self.n_samples} samples from the real dataset."
             )
-            for i in tqdm(range(num_batches)):
+            for _ in tqdm(range(num_batches)):
                 try:
                     real_samples = next(self.dl)
                 except StopIteration:
@@ -65,7 +65,7 @@ class FIDEvaluation():
             m2 = np.mean(stacked_real_features, axis=0)
             s2 = np.cov(stacked_real_features, rowvar=False)
             np.savez_compressed(path, m2=m2, s2=s2)
-            self.print_fn(f"Dataset stats cached to {path} for future use.")
+            self.print_fn(f"Dataset stats cached to {path}.npz for future use.")
             self.m2, self.s2 = m2, s2
         self.dataset_stats_loaded = True
     
@@ -74,6 +74,7 @@ class FIDEvaluation():
         if not self.dataset_stats_loaded:
             self.load_or_precalc_dataset_stats()
 
+        self.sampler.eval()
         batches = num_to_groups(self.n_samples, self.batch_size)
         stacked_fake_features = []
         self.print_fn(
