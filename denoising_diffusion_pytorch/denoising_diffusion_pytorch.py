@@ -25,8 +25,7 @@ from ema_pytorch import EMA
 from accelerate import Accelerator
 
 import numpy as np
-from pytorch_fid.inception import InceptionV3
-from pytorch_fid.fid_score import calculate_frechet_distance
+from fid_evaluation import FIDEvaluation
 
 from denoising_diffusion_pytorch.version import __version__
 
@@ -845,7 +844,9 @@ class Trainer(object):
         split_batches = True,
         convert_image_to = None,
         calculate_fid = True,
-        inception_block_idx = 2048
+        inception_block_idx = 2048,
+        num_fid_samples = 50000,
+        save_best_and_latest_only = False
     ):
         super().__init__()
 
@@ -863,21 +864,15 @@ class Trainer(object):
         self.model = diffusion_model
         self.channels = diffusion_model.channels
 
-        # InceptionV3 for fid-score computation
-
-        self.inception_v3 = None
-
-        if calculate_fid:
-            assert inception_block_idx in InceptionV3.BLOCK_INDEX_BY_DIM
-            block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[inception_block_idx]
-            self.inception_v3 = InceptionV3([block_idx])
-            self.inception_v3.to(self.device)
-
         # sampling and training hyperparameters
 
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
         self.save_and_sample_every = save_and_sample_every
+        if save_best_and_latest_only:
+            assert calculate_fid, "`calculate_fid` must be True to provide a means for model evaluation for `save_best_and_latest_only`."
+            self.best_fid = 1e10 # infinite
+        self.save_best_and_latest_only = save_best_and_latest_only
 
         self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
@@ -913,6 +908,27 @@ class Trainer(object):
         # prepare model, dataloader, optimizer with accelerator
 
         self.model, self.opt = self.accelerator.prepare(self.model, self.opt)
+
+        # FID-score computation
+
+        if calculate_fid:
+            self.calculate_fid = True
+            if not self.model.is_ddim_sampling:
+                self.accelerator.print(
+                    "WARNING: Robust FID computation requires a lot of generated samples and can therefore be very time consuming."\
+                    "Consider using DDIM sampling to save time."
+                )
+            self.fid_scorer = FIDEvaluation(
+                batch_size=self.batch_size,
+                dl=self.dl,
+                sampler=self.ema.ema_model,
+                channels=self.channels,
+                accelerator=self.accelerator,
+                stats_dir=results_folder,
+                device=self.device,
+                num_fid_samples=num_fid_samples,
+                inception_block_idx=inception_block_idx
+            )
 
     @property
     def device(self):
@@ -952,31 +968,6 @@ class Trainer(object):
 
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
-
-    @torch.no_grad()
-    def calculate_activation_statistics(self, samples):
-        assert exists(self.inception_v3)
-
-        features = self.inception_v3(samples)[0]
-        features = rearrange(features, '... 1 1 -> ...').cpu().numpy()
-
-        mu = np.mean(features, axis = 0)
-        sigma = np.cov(features, rowvar = False)
-        return mu, sigma
-
-    def fid_score(self, real_samples, fake_samples):
-
-        if self.channels == 1:
-            real_samples, fake_samples = map(lambda t: repeat(t, 'b 1 ... -> b c ...', c = 3), (real_samples, fake_samples))
-
-        min_batch = min(real_samples.shape[0], fake_samples.shape[0])
-        real_samples, fake_samples = map(lambda t: t[:min_batch], (real_samples, fake_samples))
-
-        m1, s1 = self.calculate_activation_statistics(real_samples)
-        m2, s2 = self.calculate_activation_statistics(fake_samples)
-
-        fid_value = calculate_frechet_distance(m1, s1, m2, s2)
-        return fid_value
 
     def train(self):
         accelerator = self.accelerator
@@ -1023,13 +1014,19 @@ class Trainer(object):
                         all_images = torch.cat(all_images_list, dim = 0)
 
                         utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = int(math.sqrt(self.num_samples)))
-                        self.save(milestone)
 
                         # whether to calculate fid
 
-                        if exists(self.inception_v3):
-                            fid_score = self.fid_score(real_samples = data, fake_samples = all_images)
+                        if self.calculate_fid:
+                            fid_score = self.fid_scorer.fid_score()
                             accelerator.print(f'fid_score: {fid_score}')
+                        if self.save_best_and_latest_only:
+                            if self.best_fid > fid_score:
+                                self.best_fid = fid_score
+                                self.save("best")
+                            self.save("latest")
+                        else:
+                            self.save(milestone)
 
                 pbar.update(1)
 
