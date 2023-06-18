@@ -83,7 +83,7 @@ def Downsample(
         nn.Conv2d(dim * (factor ** 2), default(dim_out, dim), 1)
     )
 
-class LayerNorm(nn.Module):
+class RMSNorm(nn.Module):
     def __init__(self, dim, scale = True, normalize_dim = 2):
         super().__init__()
         self.g = nn.Parameter(torch.ones(dim)) if scale else 1
@@ -94,11 +94,7 @@ class LayerNorm(nn.Module):
     def forward(self, x):
         normalize_dim = self.normalize_dim
         scale = append_dims(self.g, x.ndim - self.normalize_dim - 1) if self.scale else 1
-
-        eps = 1e-5 if x.dtype == torch.float32 else 1e-3
-        var = torch.var(x, dim = normalize_dim, unbiased = False, keepdim = True)
-        mean = torch.mean(x, dim = normalize_dim, keepdim = True)
-        return (x - mean) * var.clamp(min = eps).rsqrt() * scale
+        return F.normalize(x, dim = normalize_dim) * scale * (x.shape[normalize_dim] ** 0.5)
 
 # sinusoidal positional embeds
 
@@ -169,12 +165,12 @@ class LinearAttention(nn.Module):
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        self.norm = LayerNorm(dim, normalize_dim = 1)
+        self.norm = RMSNorm(dim, normalize_dim = 1)
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
 
         self.to_out = nn.Sequential(
             nn.Conv2d(hidden_dim, dim, 1),
-            LayerNorm(dim, normalize_dim = 1)
+            RMSNorm(dim, normalize_dim = 1)
         )
 
     def forward(self, x):
@@ -207,7 +203,7 @@ class Attention(nn.Module):
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        self.norm = LayerNorm(dim)
+        self.norm = RMSNorm(dim)
 
         self.attn_dropout = nn.Dropout(dropout)
         self.to_qkv = nn.Linear(dim, hidden_dim * 3, bias = False)
@@ -247,7 +243,7 @@ class FeedForward(nn.Module):
         dropout = 0.
     ):
         super().__init__()
-        self.norm = LayerNorm(dim, scale = False)
+        self.norm = RMSNorm(dim, scale = False)
         dim_hidden = dim * mult
 
         self.to_scale_shift = nn.Sequential(
@@ -359,10 +355,11 @@ class UViT(nn.Module):
                 self.init_conv = nn.Conv2d(channels, init_dim, patch_size, stride = patch_size)
             else:
                 self.init_conv = nn.Sequential(
-                    Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1 = patch_size, p2 = patch_size),
-                    LayerNorm(input_channels, normalize_dim = 1),
-                    nn.Conv2d(input_channels, init_dim, 1),
-                    LayerNorm(init_dim, normalize_dim = 1)
+                    Rearrange('b c (h p1) (w p2) -> b h w (c p1 p2)', p1 = patch_size, p2 = patch_size),
+                    nn.LayerNorm(input_channels),
+                    nn.Linear(input_channels, init_dim),
+                    nn.LayerNorm(init_dim),
+                    Rearrange('b h w c -> b c h w')
                 )
 
             self.unpatchify = nn.ConvTranspose2d(input_channels, channels, patch_size, stride = patch_size)
