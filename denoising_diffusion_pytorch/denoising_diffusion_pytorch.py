@@ -627,7 +627,7 @@ class GaussianDiffusion(nn.Module):
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance, x_start
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def p_sample(self, x, t: int, x_self_cond = None):
         b, *_, device = *x.shape, self.device
         batched_times = torch.full((b,), t, device = device, dtype = torch.long)
@@ -636,7 +636,7 @@ class GaussianDiffusion(nn.Module):
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def p_sample_loop(self, shape, return_all_timesteps = False):
         batch, device = shape[0], self.device
 
@@ -655,7 +655,7 @@ class GaussianDiffusion(nn.Module):
         ret = self.unnormalize(ret)
         return ret
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def ddim_sample(self, shape, return_all_timesteps = False):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
@@ -697,13 +697,13 @@ class GaussianDiffusion(nn.Module):
         ret = self.unnormalize(ret)
         return ret
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def sample(self, batch_size = 16, return_all_timesteps = False):
         image_size, channels = self.image_size, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
         return sample_fn((batch_size, channels, image_size, image_size), return_all_timesteps = return_all_timesteps)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
         b, *_, device = *x1.shape, x1.device
         t = default(t, self.num_timesteps - 1)
@@ -754,7 +754,7 @@ class GaussianDiffusion(nn.Module):
 
         x_self_cond = None
         if self.self_condition and random() < 0.5:
-            with torch.no_grad():
+            with torch.inference_mode():
                 x_self_cond = self.model_predictions(x, t).pred_x_start
                 x_self_cond.detach_()
 
@@ -1006,7 +1006,7 @@ class Trainer(object):
                     if self.step != 0 and self.step % self.save_and_sample_every == 0:
                         self.ema.ema_model.eval()
 
-                        with torch.no_grad():
+                        with torch.inference_mode():
                             milestone = self.step // self.save_and_sample_every
                             batches = num_to_groups(self.num_samples, self.batch_size)
                             all_images_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
