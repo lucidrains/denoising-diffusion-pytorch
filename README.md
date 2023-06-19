@@ -105,6 +105,7 @@ $ accelerate launch train.py
 ### 1D Sequence
 
 By popular request, a 1D Unet + Gaussian Diffusion implementation.
+
 ```python
 import torch
 from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D, Trainer1D
@@ -146,7 +147,9 @@ sampled_seq = diffusion.sample(batch_size = 4)
 sampled_seq.shape # (4, 32, 128)
 
 ```
-`Trainer1D` does not evaluate the generated samples in any way since the type of data is not known. 
+
+`Trainer1D` does not evaluate the generated samples in any way since the type of data is not known.
+
 You could consider adding a suitable metric to the training loop yourself after doing an editable install of this package
 `pip install -e .`.
 
