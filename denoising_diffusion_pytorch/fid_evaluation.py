@@ -53,7 +53,8 @@ class FIDEvaluation:
             ckpt = np.load(path + ".npz")
             self.m2, self.s2 = ckpt["m2"], ckpt["s2"]
             self.print_fn("Dataset stats loaded from disk.")
-        except FileNotFoundError:
+            ckpt.close()
+        except OSError:
             num_batches = int(math.ceil(self.n_samples / self.batch_size))
             stacked_real_features = []
             self.print_fn(
