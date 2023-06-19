@@ -3,6 +3,7 @@ import torch
 from torch import sqrt
 from torch import nn, einsum
 import torch.nn.functional as F
+from torch.cuda.amp import autocast
 from torch.special import expm1
 
 from tqdm import tqdm
@@ -233,6 +234,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
 
     # training related functions - noise prediction
 
+    @autocast(enabled = False)
     def q_sample(self, x_start, times, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
