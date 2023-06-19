@@ -706,6 +706,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
+    @autocast(enabled = False)
     def q_sample(self, x_start, t, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
