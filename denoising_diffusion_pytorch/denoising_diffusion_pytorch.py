@@ -25,7 +25,6 @@ from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
-import numpy as np
 from denoising_diffusion_pytorch.fid_evaluation import FIDEvaluation
 
 from denoising_diffusion_pytorch.version import __version__
