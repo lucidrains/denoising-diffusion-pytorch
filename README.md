@@ -32,7 +32,8 @@ from denoising_diffusion_pytorch import Unet, GaussianDiffusion
 
 model = Unet(
     dim = 64,
-    dim_mults = (1, 2, 4, 8)
+    dim_mults = (1, 2, 4, 8),
+    flash_attn = True
 )
 
 diffusion = GaussianDiffusion(
@@ -57,7 +58,8 @@ from denoising_diffusion_pytorch import Unet, GaussianDiffusion, Trainer
 
 model = Unet(
     dim = 64,
-    dim_mults = (1, 2, 4, 8)
+    dim_mults = (1, 2, 4, 8),
+    flash_attn = True
 )
 
 diffusion = GaussianDiffusion(
