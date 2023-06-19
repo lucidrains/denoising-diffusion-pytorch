@@ -230,16 +230,6 @@ You could consider adding a suitable metric to the training loop yourself after 
 ```
 
 ```bibtex
-@article{Qiao2019WeightS,
-    title   = {Weight Standardization},
-    author  = {Siyuan Qiao and Huiyu Wang and Chenxi Liu and Wei Shen and Alan Loddon Yuille},
-    journal = {ArXiv},
-    year    = {2019},
-    volume  = {abs/1903.10520}
-}
-```
-
-```bibtex
 @article{Salimans2022ProgressiveDF,
     title   = {Progressive Distillation for Fast Sampling of Diffusion Models},
     author  = {Tim Salimans and Jonathan Ho},
