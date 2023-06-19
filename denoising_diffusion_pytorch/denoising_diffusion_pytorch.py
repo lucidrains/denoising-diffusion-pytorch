@@ -218,7 +218,6 @@ class LinearAttention(nn.Module):
         k = k.softmax(dim = -1)
 
         q = q * self.scale
-        v = v / (h * w)
 
         context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
 
