@@ -9,6 +9,7 @@ from multiprocessing import cpu_count
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
+from torch.cuda.amp import autocast
 from torch.utils.data import Dataset, DataLoader
 
 from torch.optim import Adam
@@ -708,6 +709,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
+    @autocast(enabled = False)
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
