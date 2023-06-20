@@ -912,9 +912,8 @@ class Trainer(object):
 
         # FID-score computation
 
-        self.calculate_fid = False
+        self.calculate_fid = calculate_fid
         if calculate_fid:
-            self.calculate_fid = True
             if not self.model.is_ddim_sampling:
                 self.accelerator.print(
                     "WARNING: Robust FID computation requires a lot of generated samples and can therefore be very time consuming."\
