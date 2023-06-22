@@ -45,6 +45,7 @@ diffusion = GaussianDiffusion(
 training_images = torch.rand(8, 3, 128, 128) # images are normalized from 0 to 1
 loss = diffusion(training_images)
 loss.backward()
+
 # after a lot of training
 
 sampled_images = diffusion.sample(batch_size = 4)
@@ -110,7 +111,7 @@ By popular request, a 1D Unet + Gaussian Diffusion implementation.
 
 ```python
 import torch
-from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D, Trainer1D
+from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D, Trainer1D, Dataset1D
 
 model = Unet1D(
     dim = 64,
@@ -126,6 +127,8 @@ diffusion = GaussianDiffusion1D(
 )
 
 training_seq = torch.rand(64, 32, 128) # features are normalized from 0 to 1
+dataset = Dataset1D(training_seq)  # this is just an example, but you can formulate your own Dataset and pass it into the `Trainer1D` below
+
 loss = diffusion(training_seq)
 loss.backward()
 
@@ -133,7 +136,7 @@ loss.backward()
 
 trainer = Trainer1D(
     diffusion,
-    dataset = training_seq,
+    dataset = dataset,
     train_batch_size = 32,
     train_lr = 8e-5,
     train_num_steps = 700000,         # total training steps
