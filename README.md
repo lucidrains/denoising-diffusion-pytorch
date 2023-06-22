@@ -45,6 +45,7 @@ diffusion = GaussianDiffusion(
 training_images = torch.rand(8, 3, 128, 128) # images are normalized from 0 to 1
 loss = diffusion(training_images)
 loss.backward()
+
 # after a lot of training
 
 sampled_images = diffusion.sample(batch_size = 4)

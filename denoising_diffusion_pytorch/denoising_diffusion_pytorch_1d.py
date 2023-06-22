@@ -1,21 +1,22 @@
 import math
-from multiprocessing import cpu_count
 from pathlib import Path
 from random import random
 from functools import partial
 from collections import namedtuple
+from multiprocessing import cpu_count
 
 import torch
-from accelerate import Accelerator
-from ema_pytorch import EMA
-from torch import nn, einsum
+from torch import nn, einsum, Tensor
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
+from torch.optim import Adam
+from torch.utils.data import Dataset, DataLoader
 
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
-from torch.optim import Adam
-from torch.utils.data import Dataset, DataLoader
+
+from accelerate import Accelerator
+from ema_pytorch import EMA
 
 from tqdm.auto import tqdm
 
@@ -66,6 +67,19 @@ def normalize_to_neg_one_to_one(img):
 
 def unnormalize_to_zero_to_one(t):
     return (t + 1) * 0.5
+
+# data
+
+class Dataset1D(Dataset):
+    def __init__(self, tensor: Tensor):
+        super().__init__()
+        self.tensor = tensor.clone()
+
+    def __len__(self):
+        return len(self.tensor)
+
+    def __getitem__(self, idx):
+        return self.tensor[idx].clone()
 
 # small helper modules
 
@@ -714,7 +728,7 @@ class Trainer1D(object):
         num_samples = 25,
         results_folder = './results',
         amp = False,
-        fp16 = False,
+        mixed_precision_type = 'fp16',
         split_batches = True,
     ):
         super().__init__()
@@ -723,10 +737,8 @@ class Trainer1D(object):
 
         self.accelerator = Accelerator(
             split_batches = split_batches,
-            mixed_precision = 'fp16' if fp16 else 'no'
+            mixed_precision = mixed_precision_type if amp else 'no'
         )
-
-        self.accelerator.native_amp = amp
 
         # model
 
