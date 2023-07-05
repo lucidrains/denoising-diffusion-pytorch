@@ -49,6 +49,9 @@ def cast_tuple(t, length = 1):
         return t
     return ((t,) * length)
 
+def divisible_by(numer, denom):
+    return (numer % denom) == 0
+
 def identity(t, *args, **kwargs):
     return t
 
@@ -125,7 +128,7 @@ class RandomOrLearnedSinusoidalPosEmb(nn.Module):
 
     def __init__(self, dim, is_random = False):
         super().__init__()
-        assert (dim % 2) == 0
+        assert divisible_by(dim, 2)
         half_dim = dim // 2
         self.weights = nn.Parameter(torch.randn(half_dim), requires_grad = not is_random)
 
@@ -355,7 +358,13 @@ class Unet(nn.Module):
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
+    @property
+    def downsample_factor(self):
+        return 2 ** (len(self.downs) - 1)
+
     def forward(self, x, time, x_self_cond = None):
+        assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
+
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim = 1)
@@ -868,13 +877,10 @@ class Trainer(object):
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
         self.save_and_sample_every = save_and_sample_every
-        if save_best_and_latest_only:
-            assert calculate_fid, "`calculate_fid` must be True to provide a means for model evaluation for `save_best_and_latest_only`."
-            self.best_fid = 1e10 # infinite
-        self.save_best_and_latest_only = save_best_and_latest_only
 
         self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
+        assert (train_batch_size * gradient_accumulate_every) >= 16, f'your effective batch size (train_batch_size x gradient_accumulate_every) should be at least 16 or above'
 
         self.train_num_steps = train_num_steps
         self.image_size = diffusion_model.image_size
@@ -884,6 +890,9 @@ class Trainer(object):
         # dataset and dataloader
 
         self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
+
+        assert len(self.ds) >= 100, 'you should have at least 100 images in your folder. at least 10k images recommended'
+
         dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
         dl = self.accelerator.prepare(dl)
@@ -931,6 +940,12 @@ class Trainer(object):
                 num_fid_samples=num_fid_samples,
                 inception_block_idx=inception_block_idx
             )
+
+        if save_best_and_latest_only:
+            assert calculate_fid, "`calculate_fid` must be True to provide a means for model evaluation for `save_best_and_latest_only`."
+            self.best_fid = 1e10 # infinite
+
+        self.save_best_and_latest_only = save_best_and_latest_only
 
     @property
     def device(self):
@@ -1005,7 +1020,7 @@ class Trainer(object):
                 if accelerator.is_main_process:
                     self.ema.update()
 
-                    if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                    if self.step != 0 and divisible_by(self.step, self.save_and_sample_every):
                         self.ema.ema_model.eval()
 
                         with torch.inference_mode():
