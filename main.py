@@ -10,6 +10,7 @@ def main(args):
         device_name = 'cuda:0'
     else:
         device_name = 'cpu'
+
     device = torch.device(device_name)
     print(f"Device : {device_name}")
 
@@ -34,7 +35,7 @@ def main(args):
     diffusion = GaussianDiffusion1D(
         model,
         seq_length = 1000,
-        timesteps = 100,
+        timesteps = 1000,
         objective = 'pred_v'
     )
 
@@ -44,7 +45,7 @@ def main(args):
         dataset = dataset,
         train_batch_size = 32,
         train_lr = 8e-5,
-        train_num_steps = 100,         # total training steps
+        train_num_steps = 10000,         # total training steps
         gradient_accumulate_every = 2,    # gradient accumulation steps
         ema_decay = 0.995,                # exponential moving average decay
         amp = True,                       # turn on mixed precision
@@ -52,7 +53,7 @@ def main(args):
     trainer.train()
 
     sampled_seq = diffusion.sample(batch_size = 16)
-    with open('sample.pkl', 'wb') as f:
+    with open('sample2.pkl', 'wb') as f:
         pickle.dump(sampled_seq, f)
 
 if __name__ == '__main__':
