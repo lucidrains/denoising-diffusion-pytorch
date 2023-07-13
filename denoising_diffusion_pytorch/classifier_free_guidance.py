@@ -263,6 +263,8 @@ class Unet(nn.Module):
         learned_sinusoidal_cond = False,
         random_fourier_features = False,
         learned_sinusoidal_dim = 16,
+        attn_dim_head = 32,
+        attn_heads = 4
     ):
         super().__init__()
 
@@ -334,7 +336,7 @@ class Unet(nn.Module):
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim, classes_emb_dim = classes_dim)
-        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim)))
+        self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, dim_head = attn_dim_head, heads = attn_heads)))
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim, classes_emb_dim = classes_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):

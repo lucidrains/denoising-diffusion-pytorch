@@ -271,6 +271,8 @@ class Unet(nn.Module):
         learned_sinusoidal_cond = False,
         random_fourier_features = False,
         learned_sinusoidal_dim = 16,
+        attn_dim_head = 32,
+        attn_heads = 4,
         full_attn = (False, False, False, True),
         flash_attn = False
     ):
@@ -331,7 +333,7 @@ class Unet(nn.Module):
             self.downs.append(nn.ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                attn_klass(dim_in),
+                attn_klass(dim_in, dim_head = attn_dim_head, heads = attn_heads),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
@@ -348,7 +350,7 @@ class Unet(nn.Module):
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                attn_klass(dim_out),
+                attn_klass(dim_out, dim_head = attn_dim_head, heads = attn_heads),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
 
