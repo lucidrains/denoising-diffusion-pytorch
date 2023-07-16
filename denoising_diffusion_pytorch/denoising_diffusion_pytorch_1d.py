@@ -282,7 +282,6 @@ class Unet1D(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
 
         block_klass = partial(ResnetBlock, groups = resnet_block_groups)
-
         # time embeddings
 
         time_dim = dim * 4
