@@ -1,3 +1,4 @@
+import os
 import math
 from pathlib import Path
 from random import random
@@ -773,7 +774,8 @@ class Trainer1D(object):
             self.ema.to(self.device)
 
         self.results_folder = Path(results_folder)
-        self.results_folder.mkdir(exist_ok = True)
+        os.makedirs(self.results_folder, exist_ok=True)
+        # self.results_folder.mkdir(exist_ok = True)
 
         # step counter state
 
@@ -865,7 +867,7 @@ class Trainer1D(object):
 
                         all_samples = torch.cat(all_samples_list, dim = 0)
 
-                        torch.save(all_samples, str(self.results_folder / f'sample-{milestone}.png'))
+                        # torch.save(all_samples, str(self.results_folder / f'sample-{milestone}.png'))
                         self.save(milestone)
 
                 pbar.update(1)

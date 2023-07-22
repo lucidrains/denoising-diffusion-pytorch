@@ -22,14 +22,14 @@ def main(args):
     train_setting = f'seed_{args.seed}_sampling_method_{args.sampling_method}_num_samples_{args.num_samples}-'\
                       f'diffusion_time_steps_{args.diffusion_time_steps}-train_num_steps_{args.train_num_steps}'
     if not args.ignore_wandb:
-        wandb.init(project='check_sampling_time',
+        wandb.init(project='check_train_time',
                    entity='ppg-diffusion')
         wandb_run_name = train_setting
         wandb.run.name = wandb_run_name
 
 
     train_set_root = paths.TRAINSET_ROOT
-    train_set_name = f'seed_{args.seed}-0sampling_method_{args.sampling_method}-num_samples_{args.num_samples}'
+    train_set_name = f'seed_{args.seed}-sampling_method_{args.sampling_method}-num_samples_{args.num_samples}'
     # TODO: 다운로드 다 되면 paths에서 관리
     print(f"data sampling started, sampling method: {args.sampling_method}, num_samples for each patient: {args.num_samples}")
     data_sampling_start = time.time()
@@ -59,17 +59,20 @@ def main(args):
     )
 
     dataset = Dataset1D(training_seq)
+
+    result_path = os.path.join(paths.WEIGHT_ROOT, train_setting)
     trainer = Trainer1D(
         diffusion,
         dataset = dataset,
-        train_batch_size = 32,
+        train_batch_size = 64,
         train_lr = 8e-5,
-        train_num_steps = args.train_num_steps,          # total training steps
+        train_num_steps = args.train_num_steps * args.num_samples,          # total training steps
         gradient_accumulate_every = 2,                   # gradient accumulation steps
         ema_decay = 0.995,                               # exponential moving average decay
         amp = True,                                      # turn on mixed precision
+        results_folder = result_path
     )
-
+    trainer.save('last')
     if not args.sample_only:
         train_start_time = time.time()
         trainer.train()
