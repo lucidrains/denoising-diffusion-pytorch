@@ -1,10 +1,10 @@
-for num_samples in 10
+for num_samples in 5 10 30
 do
-for diffusion_time_steps in 300 2000
+for diffusion_time_steps in 1000
 do
 for train_num_steps in 5000 10000 20000
 do
-CUDA_VISIBLE_DEVICES=2 /mlainas/teang1995/anaconda3/envs/PPG/bin/python main.py \
+CUDA_VISIBLE_DEVICES=6 /mlainas/teang1995/anaconda3/envs/PPG/bin/python main.py \
 --num_samples ${num_samples} \
 --diffusion_time_steps ${diffusion_time_steps} \
 --train_num_steps ${train_num_steps}
