@@ -19,7 +19,6 @@ from accelerate import Accelerator
 from ema_pytorch import EMA
 
 from tqdm.auto import tqdm
-
 from denoising_diffusion_pytorch.version import __version__
 
 # constants
@@ -282,7 +281,6 @@ class Unet1D(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
 
         block_klass = partial(ResnetBlock, groups = resnet_block_groups)
-
         # time embeddings
 
         time_dim = dim * 4
@@ -389,6 +387,9 @@ def extract(a, t, x_shape):
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 def linear_beta_schedule(timesteps):
+    """
+    linear schedule, proposed in original ddpm paper
+    """
     scale = 1000 / timesteps
     beta_start = scale * 0.0001
     beta_end = scale * 0.02
@@ -420,7 +421,7 @@ class GaussianDiffusion1D(nn.Module):
         auto_normalize = True
     ):
         super().__init__()
-        self.model = model
+        self.model = model.requires_grad_(True)
         self.channels = self.model.channels
         self.self_condition = self.model.self_condition
 
@@ -567,12 +568,33 @@ class GaussianDiffusion1D(nn.Module):
 
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance, x_start
-
+    
+    def condition_mean(self, cond_fn, mean,variance, x, t, guidance_kwargs=None):
+        """
+        Compute the mean for the previous step, given a function cond_fn that
+        computes the gradient of a conditional log probability with respect to
+        x. In particular, cond_fn computes grad(log(p(y|x))), and we want to
+        condition on y.
+        This uses the conditioning strategy from Sohl-Dickstein et al. (2015).
+        """
+        gradient = cond_fn(x, t, **guidance_kwargs)
+        new_mean = (
+            mean.float() + variance * gradient.float()
+        )
+        print("gradient: ",(variance * gradient.float()).mean())
+        return new_mean
+    
     @torch.no_grad()
     def p_sample(self, x, t: int, x_self_cond = None, clip_denoised = True):
+        # TODO 밑에꺼 y 받아라
+        y = torch.rand(16, 2, requires_grad=True).to('cuda')
+        cond_fn = regressor_cond_fn(x, t, self.model.Regressor, y, regressor_scale=1)
         b, *_, device = *x.shape, x.device
         batched_times = torch.full((b,), t, device = x.device, dtype = torch.long)
-        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = clip_denoised)
+        model_mean, variance, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = clip_denoised)
+        # TODO : arg로 condition 조정, cond_fn 인자로 받기
+        model_mean = self.condition_mean(cond_fn, model_mean, variance, x, batched_times) # guidance_kwargs
+
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
@@ -682,8 +704,9 @@ class GaussianDiffusion1D(nn.Module):
                 x_self_cond.detach_()
 
         # predict and take gradient step
-
-        model_out = self.model(x, t, x_self_cond)
+        # added -> dist_alg : pz mean, pz var, z mean, z var 
+        model_out, dist_alg = self.model(x, t, x_self_cond)
+        pz_mean, pz_var, z_mean, z_var = dist_alg
 
         if self.objective == 'pred_noise':
             target = noise
@@ -694,11 +717,18 @@ class GaussianDiffusion1D(nn.Module):
             target = v
         else:
             raise ValueError(f'unknown objective {self.objective}')
+        
+        #
+        kl_loss = 1 + z_var - pz_var - torch.div((z_mean-pz_mean)**2, torch.exp(pz_var)) - torch.div(torch.exp(z_var), torch.exp(pz_var))
+        kl_loss = -0.5 * torch.sum(kl_loss, dim=-1)
 
-        loss = F.mse_loss(model_out, target, reduction = 'none')
-        loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        # TODO : do it
+        reg_loss = 0
 
-        loss = loss * extract(self.loss_weight, t, loss.shape)
+        rec_loss = F.mse_loss(model_out, target, reduction = 'none')
+        rec_loss = reduce(rec_loss, 'b ... -> b (...)', 'mean')
+        rec_loss = rec_loss * extract(self.loss_weight, t, rec_loss.shape)
+        loss = kl_loss.mean(-1) + reg_loss + rec_loss.mean(-1)
         return loss.mean()
 
     def forward(self, img, *args, **kwargs):
