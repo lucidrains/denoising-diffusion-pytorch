@@ -33,7 +33,7 @@ def main(args):
     # TODO: 다운로드 다 되면 paths에서 관리
     print(f"data sampling started, sampling method: {args.sampling_method}, num_samples for each patient: {args.num_samples}")
     data_sampling_start = time.time()
-    training_seq = data.get_data(sampling_method=args.sampling_method,
+    training_seq, len_seq = data.get_data(sampling_method=args.sampling_method,
                                  num_samples=args.num_samples,
                                  data_root=paths.DATA_ROOT)
     data_sampling_time = time.time() - data_sampling_start
@@ -66,7 +66,7 @@ def main(args):
         dataset = dataset,
         train_batch_size = 64,
         train_lr = 8e-5,
-        train_num_steps = args.train_num_steps * args.num_samples,          # total training steps
+        train_num_steps = args.train_num_steps * len_seq,          # total training steps
         gradient_accumulate_every = 2,                   # gradient accumulation steps
         ema_decay = 0.995,                               # exponential moving average decay
         amp = True,                                      # turn on mixed precision

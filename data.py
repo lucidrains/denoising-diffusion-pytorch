@@ -22,7 +22,7 @@ def get_data(sampling_method='first_k',
                 sample_tensor = torch.tensor(sample['PPG'].values)
                 sample_list.append(sample_tensor)
 
-
+    len_seq = len(sample_list)
     training_seq = torch.stack(sample_list).unsqueeze(1).half()
     
-    return training_seq
+    return training_seq, len_seq

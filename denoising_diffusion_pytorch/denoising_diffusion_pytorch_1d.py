@@ -871,5 +871,4 @@ class Trainer1D(object):
                         self.save(milestone)
 
                 pbar.update(1)
-        import pdb; pdb.set_trace()
         accelerator.print('training complete')
