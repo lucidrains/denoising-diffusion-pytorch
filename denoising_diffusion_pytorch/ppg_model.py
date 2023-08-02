@@ -7,39 +7,40 @@ from torch.nn.utils import spectral_norm
 
 # model
 class DenseUnitNorm(nn.Module):
-    def __init__(self, features, embedding_dim):
+    def __init__(self, features, embedding_dim, seq_length):  # 2 512 125
+        # TODO : to device
         super(DenseUnitNorm, self).__init__()
-        self.conv = nn.Conv1d(features, embedding_dim, kernel_size=1)
-        self.conv = spectral_norm(self.conv)
+        self.linear_mean = nn.Linear(features, embedding_dim)
+        self.linear_mean2 = nn.Linear(1, seq_length)
+        self.linear_mean2 = spectral_norm(self.linear_mean2)
+        self.linear_var = nn.Linear(features, embedding_dim)
+        self.linear_var2 = nn.Linear(1, seq_length)
+        self.linear_var2 = spectral_norm(self.linear_var2)
 
-    def forward(self, x):
-        return self.conv(x)
-    
-def regressor_cond_fn(x, t, regressor, y, regressor_scale=1):
-    """
-    return the gradient of the MSE of the regressor output and y wrt x.
-    formally expressed as d_mse(regressor(x, t), y) / dx
-    """
-    assert y is not None
-    with torch.enable_grad():
-        x_in = x.detach().requires_grad_(True)
-        predictions = regressor(x_in, t)
-        mse = ((predictions - y.view(-1)) ** 2).mean()
-        grad = torch.autograd.grad(mse, x_in)[0] * regressor_scale
-        return grad
+    def forward(self, x):  # x shape: [32, 2]
+        mean = self.linear_mean(x) # 32 512
+        var = self.linear_var(x) # 32 512
+        
+        mean = mean.unsqueeze(-1)
+        var = var.unsqueeze(-1)
+        
+        mean = self.linear_mean2(mean)
+        var = self.linear_var2(var)
+
+
+        return mean, var
     
 def sample_norm(mean, variance):
     stddev = torch.sqrt(variance)
-    dist = Normal(mean, stddev)
+    dist = Normal(0, 1)
     sample = dist.sample()
-
+    sample = sample*mean + stddev
     return sample
 
 class RegressorGuidanceUnet1D(nn.Module):
     def __init__(
         self,
         dim,
-        y,
         init_dim = None,
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
@@ -89,9 +90,9 @@ class RegressorGuidanceUnet1D(nn.Module):
 
         # layers
         
-        self.Regressor = MLPRegressor(input_size=channels * seq_length, hidden_size=128, num_layers=3, output_size=2)
-        #self.Regressor = MLPRegressorConv()
-        self.DenseUnit = DenseUnitNorm(2, 512) # 하드코딩 수정 필요
+        # self.Regressor = MLPRegressor(input_size=seq_length, hidden_size=128, num_layers=3, output_size=2)
+        self.Regressor = MLPRegressorConv(input_size=1, hidden_channels=128, num_layers=3, output_channels=2, seq_length=1000)
+        self.DenseUnit = DenseUnitNorm(2, 512, 125) # 하드코딩 수정 필요
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
         num_resolutions = len(in_out)
@@ -132,11 +133,12 @@ class RegressorGuidanceUnet1D(nn.Module):
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim = 1)
-        r = self.Regressor(x)
-        pz_mu = self.DenseUnit(r)
+        # TODO 0 -> t
+        r = self.Regressor(x, 0)
+        pz_mu, pz_sig = self.DenseUnit(r)
         
         x = self.init_conv(x)
-        r = x.clone()
+        ori_r = x.clone()
 
         t = self.time_mlp(time)
 
@@ -156,25 +158,32 @@ class RegressorGuidanceUnet1D(nn.Module):
         x = self.mid_attn(x)
         # TODO : pz_mean distance loss
         #        
-        x = self.mid_block2(x, t)
-        z_mu = self.z_mean(x)
-        z_sig = self.z_variance(x)
+        x = self.mid_block2(x, t) # 32 512 125
+        
+        # added -> embedding to mu / sigma
+        x_permuted = x.permute(0, 2, 1)
+        z_mu = self.z_mean(x_permuted)
+        z_log_var = self.z_variance(x_permuted)
+
+        z_mu = z_mu.permute(0, 2, 1)
+        z_log_var = z_log_var.permute(0, 2, 1)
+        z_sig = torch.exp(z_log_var)
+
         z = sample_norm(z_mu, z_sig)
-
         for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((z, h.pop()), dim = 1)
-            x = block1(x, t)
+            z = torch.cat((z, h.pop()), dim = 1)
+            z = block1(z, t)
 
-            x = torch.cat((x, h.pop()), dim = 1)
-            x = block2(x, t)
-            x = attn(x)
+            z = torch.cat((z, h.pop()), dim = 1)
+            z = block2(z, t)
+            z = attn(z)
 
-            x = upsample(x)
+            z = upsample(z)
 
-        x = torch.cat((x, r), dim = 1)
+        x = torch.cat((z, ori_r), dim = 1)
 
         x = self.final_res_block(x, t)
-        return self.final_conv(x)
+        return self.final_conv(x), (pz_mu,pz_sig, z_mu, z_sig)
 
 
 class MLPRegressor(nn.Module):
@@ -198,32 +207,33 @@ class MLPRegressor(nn.Module):
             else:
                 x = self.dropout(F.relu(layer(x)))
         r_mu = self.r_mean(x)
-        r_sig = self.r_variance(x)
+        r_log_var = self.r_variance(x)
+        r_sig = torch.exp(r_log_var)
         r = sample_norm(r_mu, r_sig)
         return r
     
 class MLPRegressorConv(nn.Module):
-    def __init__(self, input_channels, hidden_channels, num_layers, output_channels, seq_length, drop_out=0.0):
+    def __init__(self, input_size, hidden_channels, num_layers, output_channels, seq_length, drop_out=0.0):
         super().__init__()
         self.num_layers = num_layers
-        self.layers = nn.ModuleList([nn.Conv1d(input_channels, hidden_channels, kernel_size=1, bias=True)])
+        self.layers = nn.ModuleList([nn.Conv1d(input_size, hidden_channels, kernel_size=1, bias=True)])
         for _ in range(num_layers - 2):
             self.layers.append(nn.Conv1d(hidden_channels, hidden_channels, kernel_size=1, bias=True))
         self.layers.append(nn.Conv1d(hidden_channels, hidden_channels, kernel_size=1, bias=True))
         self.dropout = nn.Dropout(drop_out)
 
-        self.r_mean = nn.Conv1d(hidden_channels, output_channels, kernel_size=1)
-        self.r_variance = nn.Conv1d(hidden_channels, output_channels, kernel_size=1)
-        
-    def forward(self, x):
+        self.r_mean = nn.Conv1d(hidden_channels, output_channels, kernel_size=seq_length)
+        self.r_log_variance = nn.Conv1d(hidden_channels, output_channels, kernel_size=seq_length)
+    
+
+    # TODO : t 추가 활용 필요
+    def forward(self, x, t):
         # x is of shape: (batch_size, input_channels, seq_length)
         for i, layer in enumerate(self.layers):
-            if i == self.num_layers - 1:
-                x = layer(x)  
-            else:
-                x = self.dropout(F.relu(layer(x)))
-        r_mu = self.r_mean(x)
-        r_sig = self.r_variance(x)
-        r = sample_norm(r_mu, r_sig)  # ensure sample_norm can handle shape (batch_size, output_channels, seq_length)
+            x = self.dropout(F.relu(layer(x)))
+        r_mu = self.r_mean(x).squeeze(-1)
+        r_log_var = self.r_log_variance(x).squeeze(-1)
+        r_sig = torch.exp(r_log_var)
+        r = sample_norm(r_mu, r_sig)
         return r
 

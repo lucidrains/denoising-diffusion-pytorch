@@ -4,7 +4,6 @@ import torch
 import os 
 import pandas as pd
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d import Unet1D, GaussianDiffusion1D, Trainer1D, Dataset1D
-from denoising_diffusion_pytorch.guided_diffusion import Classifier, classifier_cond_fn
 
 def main(args):
     if args.device == 'cuda' and torch.cuda.is_available():
@@ -15,8 +14,7 @@ def main(args):
     device = torch.device(device_name)
     print(f"Device : {device_name}")
 
-    #------------------------------------ Load Data --------------------------------------
-
+    # TODO: 다운로드 다 되면 paths에서 관리
     data_root = '/data1/data_ETRI/p09/p093486'
     col_names = ['time', 'PPG', 'abp']
 
@@ -27,11 +25,7 @@ def main(args):
         sample_list.append(sample_tensor)
     
     training_seq = torch.stack(sample_list).unsqueeze(1).half()
-    seq_length = len(training_seq)
-    dataset = Dataset1D(training_seq)
-
-    #----------------------------------- Create Model ------------------------------------
-
+    
     model = Unet1D(
         dim = 64,
         dim_mults = (1, 2, 4, 8),
@@ -45,14 +39,11 @@ def main(args):
         objective = 'pred_v'
     )
 
-    classifier = Classifier(image_size=seq_length, num_classes=2, t_dim=1)
-
-    #------------------------------------- Training --------------------------------------
-
+    dataset = Dataset1D(training_seq)
     trainer = Trainer1D(
         diffusion,
         dataset = dataset,
-        train_batch_size = args.train_batch_size,
+        train_batch_size = 32,
         train_lr = 8e-5,
         train_num_steps = 10000,         # total training steps
         gradient_accumulate_every = 2,    # gradient accumulation steps
@@ -61,26 +52,11 @@ def main(args):
     )
     trainer.train()
 
-    #------------------------------------- Sampling --------------------------------------
-
-    sampled_seq = diffusion.sample(
-        batch_size = args.sample_batch_size,
-        cond_fn=classifier_cond_fn, 
-        guidance_kwargs={
-            "classifier":classifier,
-            "y":torch.fill(torch.zeros(args.sample_batch_size), 1).long(),
-            "classifier_scale":1,
-        }
-    )
-
+    sampled_seq = diffusion.sample(batch_size = 16)
     with open('sample2.pkl', 'wb') as f:
         pickle.dump(sampled_seq, f)
 
-    #-------------------------------------------------------------------------------------
-
-
 if __name__ == '__main__':
-
     ## COMMON --------------------------------------------------
     parser = argparse.ArgumentParser(description="gp-regression for the confirmation and dead prediction")
     parser.add_argument("--seed", type=int, default=1000, help="random seed (default: 1000)")
@@ -89,9 +65,6 @@ if __name__ == '__main__':
         help = "Stop using wandb (Default : False)")
 
     ## DATA ----------------------------------------------------
-    parser.add_argument("--train_batch_size", type=int, default=32)
-    parser.add_argument("--sample_batch_size", type=int, default=32)
-
     ## Training ------------------------------------------------
     parser.add_argument("--max_epoch", type=int, default=5000)
     parser.add_argument("--init_lr", type=float, default=0.1)
@@ -102,18 +75,5 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # added
-    def regressor_cond_fn(x, t, regressor, y, regressor_scale=1):
-        """
-        return the gradient of the MSE of the regressor output and y wrt x.
-        formally expressed as d_mse(regressor(x, t), y) / dx
-        """
-        assert y is not None
-        with torch.enable_grad():
-            x_in = x.detach().requires_grad_(True)
-            predictions = regressor(x_in, t)
-            mse = ((predictions - y) ** 2).mean()
-            grad = torch.autograd.grad(mse, x_in)[0] * regressor_scale
-            return grad
 
     main(args)
