@@ -877,6 +877,7 @@ class Trainer(object):
 
         self.model = diffusion_model
         self.channels = diffusion_model.channels
+        is_ddim_sampling = diffusion_model.is_ddim_sampling
 
         # sampling and training hyperparameters
 
@@ -930,7 +931,7 @@ class Trainer(object):
         self.calculate_fid = calculate_fid and self.accelerator.is_main_process
 
         if self.calculate_fid:
-            if not self.model.is_ddim_sampling:
+            if not is_ddim_sampling:
                 self.accelerator.print(
                     "WARNING: Robust FID computation requires a lot of generated samples and can therefore be very time consuming."\
                     "Consider using DDIM sampling to save time."
