@@ -1,0 +1,5 @@
+[tool.poetry]
+packages = [
+    { include = "my_package" },
+    { include = "my_other_package", format = "sdist" },
+]
