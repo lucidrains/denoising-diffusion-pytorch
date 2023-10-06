@@ -332,3 +332,14 @@ You could consider adding a suitable metric to the training loop yourself after 
     year    = {2022}
 }
 ```
+
+```bibtex
+@article{Bondarenko2023QuantizableTR,
+    title   = {Quantizable Transformers: Removing Outliers by Helping Attention Heads Do Nothing},
+    author  = {Yelysei Bondarenko and Markus Nagel and Tijmen Blankevoort},
+    journal = {ArXiv},
+    year    = {2023},
+    volume  = {abs/2306.12929},
+    url     = {https://api.semanticscholar.org/CorpusID:259224568}
+}
+```
