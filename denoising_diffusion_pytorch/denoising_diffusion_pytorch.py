@@ -286,7 +286,7 @@ class Unet(nn.Module):
         sinusoidal_pos_emb_theta = 10000,
         attn_dim_head = 32,
         attn_heads = 4,
-        full_attn = (False, False, False, True),
+        full_attn = None,#default(F, F, F, T)
         flash_attn = False
     ):
         super().__init__()
@@ -327,6 +327,8 @@ class Unet(nn.Module):
 
         # attention
 
+        if not full_attn:
+            full_attn = tuple([False] * (len(dim_mults)-1) + [True])
         num_stages = len(dim_mults)
         full_attn  = cast_tuple(full_attn, num_stages)
         attn_heads = cast_tuple(attn_heads, num_stages)
