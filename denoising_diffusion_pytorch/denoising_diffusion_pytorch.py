@@ -302,7 +302,9 @@ class Unet(nn.Module):
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
-
+        
+        assert dim > 3 and dim % 2 == 0, 'in this version, the number of channels must be even and greater than 3'
+        resnet_block_groups = min(resnet_block_groups, dim)
         block_klass = partial(ResnetBlock, groups = resnet_block_groups)
 
         # time embeddings
