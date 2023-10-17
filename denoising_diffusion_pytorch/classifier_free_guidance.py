@@ -569,6 +569,10 @@ class GaussianDiffusion(nn.Module):
 
         register_buffer('loss_weight', loss_weight)
 
+    @property
+    def device(self):
+        return self.betas.device
+
     def predict_start_from_noise(self, x_t, t, noise):
         return (
             extract(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t -
