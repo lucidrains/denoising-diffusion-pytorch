@@ -873,7 +873,7 @@ class Trainer(object):
         amp = False,
         mixed_precision_type = 'fp16',
         split_batches = True,
-        convert_image_to = 'RGB',
+        convert_image_to = None,
         calculate_fid = True,
         inception_block_idx = 2048,
         max_grad_norm = 1.,
@@ -894,6 +894,11 @@ class Trainer(object):
         self.model = diffusion_model
         self.channels = diffusion_model.channels
         is_ddim_sampling = diffusion_model.is_ddim_sampling
+
+        # default convert_image_to depending on channels
+
+        if not exists(convert_image_to):
+            convert_image_to = {1: 'L', 3: 'RGB', 4: 'RGBA'}.get(self.channels)
 
         # sampling and training hyperparameters
 
