@@ -873,7 +873,7 @@ class Trainer(object):
         amp = False,
         mixed_precision_type = 'fp16',
         split_batches = True,
-        convert_image_to = None,
+        convert_image_to = 'RGB',
         calculate_fid = True,
         inception_block_idx = 2048,
         max_grad_norm = 1.,
