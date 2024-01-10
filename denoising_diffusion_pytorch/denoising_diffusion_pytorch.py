@@ -918,7 +918,8 @@ class Trainer(object):
         # dataset and dataloader
 
         self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
-
+        # FIXME : Code to test loaded data. Remove later
+        img_test = self.ds[0]
         assert len(self.ds) >= 100, 'you should have at least 100 images in your folder. at least 10k images recommended'
 
         dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
@@ -1026,7 +1027,7 @@ class Trainer(object):
 
                 for _ in range(self.gradient_accumulate_every):
                     data = next(self.dl).to(device)
-
+                    kju = 1
                     with self.accelerator.autocast():
                         loss = self.model(data)
                         loss = loss / self.gradient_accumulate_every
