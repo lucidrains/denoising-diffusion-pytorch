@@ -1,6 +1,7 @@
 import logging
 import math
 import copy
+import os.path
 from pathlib import Path
 from random import random
 from functools import partial
@@ -36,8 +37,10 @@ from denoising_diffusion_pytorch.version import __version__
 from torchvision.transforms import ToTensor, Lambda
 
 # logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger()
+# debugging
+DEBUG_DATA_PATH = "denoising-diffusion-pytorch/denoising_diffusion_pytorch/debug/data"
 # constants
 
 ModelPrediction = namedtuple('ModelPrediction', ['pred_noise', 'pred_x_start'])
@@ -419,10 +422,10 @@ class Unet(nn.Module):
         if self.self_condition:
             x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
             x = torch.cat((x_self_cond, x), dim=1)
-        # debug
-        print("x1")
-        print(x)
-        #-----
+        # # debug
+        # print("x1")
+        # print(x)
+        # #-----
         x = self.init_conv(x)
         r = x.clone()
 
@@ -439,10 +442,10 @@ class Unet(nn.Module):
             h.append(x)
 
             x = downsample(x)
-        # debug
-        print('x2')
-        print(x)
-        #----------
+        # # debug
+        # print('x2')
+        # print(x)
+        # #----------
         x = self.mid_block1(x, t)
         x = self.mid_attn(x) + x
         x = self.mid_block2(x, t)
@@ -835,8 +838,6 @@ class GaussianDiffusion(nn.Module):
                 x_self_cond = self.model_predictions(x, t).pred_x_start
                 x_self_cond.detach_()
 
-        # predict and take gradient step
-
         model_out = self.model(x, t, x_self_cond)
         if self.objective == 'pred_noise':
             target = noise
@@ -860,6 +861,9 @@ class GaussianDiffusion(nn.Module):
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
         img = self.normalize(img)
+        max_ = torch.max(img)
+        min_ = torch.min(img)
+        avg_ = torch.mean(img)
         # print(torch.mean(img))
         return self.p_losses(img, t, *args, **kwargs)
 
@@ -1106,6 +1110,15 @@ class Trainer(object):
 
                 for _ in range(self.gradient_accumulate_every):
                     data = next(self.dl).to(device)
+                    # Some data debugging info
+                    logger.debug(f"Data is of type {type(data)}, with dtype {data.dtype} and shape {data.shape}")
+                    logger.debug(f"Data has nan ? {torch.any(torch.isnan(data))}")
+                    logger.debug(f"Data max = {torch.max(data)} Min {torch.min(data)} avg {torch.mean(data)}")
+                    # dump data for separate debugging
+                    logger.info(f"dumping data tensor for later debugging")
+                    torch.save(obj=data,
+                               f=os.path.join(DEBUG_DATA_PATH, "data_tensor_1.pkl"))
+                    ###
                     with self.accelerator.autocast():
                         loss = self.model(data)
                         loss = loss / self.gradient_accumulate_every
