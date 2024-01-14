@@ -874,15 +874,15 @@ class Dataset(Dataset):
     def __init__(
             self,
             folder,
-            channels,
             image_size,
-            exts=['jpg', 'jpeg', 'png', 'tiff'],
+            exts=None,
             augment_horizontal_flip=False,
             convert_image_to=None
     ):
         super().__init__()
+        if exts is None:
+            exts = ['jpg', 'jpeg', 'png', 'tiff']
         self.folder = folder
-        self.channels = channels
         self.image_size = image_size
         self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
 
@@ -896,13 +896,13 @@ class Dataset(Dataset):
             T.Resize(image_size),
             T.ToTensor()
         ])
-
-    def validate_loaded_data(self):
-        for path in tqdm(self.paths, desc="validating loaded images"):
-            img = read_image(str(path))
-            assert len(img.shape) == 3
-            assert img.shape[0] == self.channels
-            assert img.shape[1] == img.shape[2] == self.image_size
+    # This function was not in the original ddpm code and created only for debugging purposes
+    # def validate_loaded_data(self):
+    #     for path in tqdm(self.paths, desc="validating loaded images"):
+    #         img = read_image(str(path))
+    #         assert len(img.shape) == 3
+    #         assert img.shape[0] == self.channels
+    #         assert img.shape[1] == img.shape[2] == self.image_size
 
     def __len__(self):
         return len(self.paths)
@@ -996,14 +996,13 @@ class Trainer(object):
 
         # dataset and dataloader
 
-        self.ds = Dataset(folder=folder, channels=self.channels, image_size=self.image_size,
+        self.ds = Dataset(folder=folder,image_size=self.image_size,
                           augment_horizontal_flip=augment_horizontal_flip,
                           convert_image_to=convert_image_to)
         # Not sure if resize need, disable that for now
         # self.ds.validate_loaded_data()
         # logger.info(f"Finished validating loaded data")
-        assert len(
-            self.ds) >= 100, 'you should have at least 100 images in your folder. at least 10k images recommended'
+        assert len(self.ds) >= 100, 'you should have at least 100 images in your folder. at least 10k images recommended'
 
         dl = DataLoader(self.ds, batch_size=train_batch_size, shuffle=True, pin_memory=True, num_workers=cpu_count())
 
