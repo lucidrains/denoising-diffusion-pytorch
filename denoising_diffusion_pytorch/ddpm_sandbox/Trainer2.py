@@ -13,10 +13,12 @@ from pathlib import Path
 from torchvision import transforms as T
 from torch.optim import Optimizer, Adam
 from tqdm import tqdm
+from datetime import datetime
 
 # logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
+
 
 
 # similar to
@@ -93,6 +95,7 @@ class Trainer2:
         # Called Exponential Smoothing or Exponential Moving Average
         ema_loss = 0.0  # Just for initialization
         ema_loss_alpha = 0.9
+        start_timestamp = datetime.now()
         with tqdm(initial=self.step, total=self.train_num_steps) as progress_bar:
             while self.step < self.train_num_steps:
                 self.optimizer.zero_grad()
@@ -104,11 +107,17 @@ class Trainer2:
                     ema_loss = ema_loss_alpha * loss.item() + (1 - ema_loss_alpha) * ema_loss
                 loss.backward()
                 self.optimizer.step()
-
+                # TODO add
+                #   1. loss curve tracking
+                #   2. sampling code
+                #   3. quality measure for samples , along with loss (FID  , WD , etc..)
                 if self.step % update_frequency == 0:
                     progress_bar.set_description(f'loss: {ema_loss:.4f}')
                 self.step += 1
                 progress_bar.update(1)
+        end_datetime = datetime.now()
+        elapsed_time = (end_datetime - start_timestamp).seconds
+        logger.info(f"Training time = {elapsed_time} seconds")
 
     # private method
     # https://www.geeksforgeeks.org/private-methods-in-python/
@@ -144,7 +153,8 @@ if __name__ == '__main__':
     num_images = 1
     num_channels = 1
     batch_size = 64
-    num_train_step = 1  # 10_000
+    num_train_step = 10_000
+    mnist_number = 8
     # Test if cuda is available
     logger.info(f"Cuda checks")
     logger.info(f'Is cuda available ? : {torch.cuda.is_available()}')
@@ -175,17 +185,16 @@ if __name__ == '__main__':
 
     # Dataset
     logger.info("Setting up MNIST dataset")
-    mnist_zero_data_path = \
-        "/home/mbaddar/Documents/mbaddar/phd/genmodel/denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0"
-    mnist_zero_dataset = Dataset2(folder=mnist_zero_data_path, image_size=image_size)
+    mnist_data_path = f"../mnist_image_samples/{mnist_number}"
+    mnist_dataset = Dataset2(folder=mnist_data_path, image_size=image_size)
 
     # Trainer
     opt = Adam(params=diffusion.parameters(), lr=1e-4)
-    trainer = Trainer2(diffusion_model=diffusion, batch_size=batch_size, dataset=mnist_zero_dataset, debug_flag=True,
+    trainer = Trainer2(diffusion_model=diffusion, batch_size=batch_size, dataset=mnist_dataset, debug_flag=True,
                        optimizer=opt, device=device, train_num_steps=num_train_step)
     trainer.train()
     logger.info(f"Saving the diffusion model...")
-    model_path = f"../models/diffusion_mnist_n_train_steps_{num_train_step}.pkl"
+    model_path = f"../models/diffusion_mnist_{mnist_number}_n_train_steps_{num_train_step}.pkl"
     torch.save(diffusion.state_dict(), model_path)
     logger.info(f"Successfully model saved to {model_path}")
     logger.info(f"Training script finished")
