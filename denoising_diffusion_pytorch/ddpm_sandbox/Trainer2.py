@@ -146,14 +146,14 @@ class Trainer2:
 
 
 if __name__ == '__main__':
-    # Parmams and constants
+    # Params and constants
     time_steps = 1000
     device = torch.device('cuda')
     image_size = 32
     num_images = 1
     num_channels = 1
     batch_size = 64
-    num_train_step = 10_000
+    num_train_step = 50_000
     mnist_number = 8
     # Test if cuda is available
     logger.info(f"Cuda checks")

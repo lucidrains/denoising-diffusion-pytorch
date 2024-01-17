@@ -38,7 +38,7 @@ if __name__ == '__main__':
     num_channels = 1
     batch_size = 64
     num_train_step = 20_000
-    model_path = "../models/diffusion_mnist_0_n_train_steps_10000.pkl"
+    model_path = "../models/diffusion_mnist_8_n_train_steps_50000.pkl"
 
     # Test if cuda is available
     logger.info(f"Cuda checks")
