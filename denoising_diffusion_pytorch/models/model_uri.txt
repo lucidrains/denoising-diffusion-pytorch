@@ -1,0 +1,4 @@
+All the models generated for this Trainer class
+denoising-diffusion-pytorch/denoising_diffusion_pytorch/ddpm_sandbox/Trainer2.py
+are saved here
+https://drive.google.com/drive/folders/12q8BLVW4-HVbKmsTIW8Mr51ZTjcFRL8M?usp=drive_link
