@@ -601,7 +601,10 @@ class GaussianDiffusion(nn.Module):
         condition on y.
         This uses the conditioning strategy from Sohl-Dickstein et al. (2015).
         """
-        gradient = cond_fn(x, t, **guidance_kwargs)
+        # this fixes a bug in the official OpenAI implementation:
+        # https://github.com/openai/guided-diffusion/issues/51 (see point 1)
+        # use the predicted mean for the previous timestep to compute gradient
+        gradient = cond_fn(mean, t, **guidance_kwargs)
         new_mean = (
             mean.float() + variance * gradient.float()
         )
