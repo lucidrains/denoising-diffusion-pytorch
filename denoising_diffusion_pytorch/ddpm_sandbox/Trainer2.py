@@ -20,8 +20,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
-
-# similar to
+# similar to denoising_diffusion_pytorch.denoising_diffusion_pytorch.Dataset
 class Dataset2(Dataset):
     EXTENSIONS = ['jpg', 'png']
 
