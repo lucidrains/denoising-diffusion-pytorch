@@ -36,14 +36,15 @@ def sinkhorn_wrapper(X1: torch.Tensor, X2: torch.Tensor):
 
 if __name__ == '__main__':
     n_samples = 10_000
+    batch_size = 64
+    img_size = 32  # mnist sample single images
     device = torch.device("cuda")
 
-    # mnist sample single images
-    img_size = 32
-    img01 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0/img_1.jpg"
-    img02 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0/img_4.jpg"
-    img81 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8/img_10.jpg"
-    img82 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8/img_20.jpg"
+    # To remove
+    # img01 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0/img_1.jpg"
+    # img02 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0/img_4.jpg"
+    # img81 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8/img_10.jpg"
+    # img82 = "../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8/img_20.jpg"
     transform = T.Compose([T.Resize(img_size),
                            T.CenterCrop(img_size),
                            T.ToTensor()])
@@ -65,45 +66,40 @@ if __name__ == '__main__':
                                                                              factor=0.5, noise=0.9)[0], device=device),
                                "X2": torch.tensor(data=datasets.make_circles(n_samples=n_samples,
                                                                              factor=0.5, noise=0.05)[0], device=device)}
-                          # ,
-                          #                   "mnist_two_zeros":
-                          #                       {"X1": transform(Image.open(img01)).to(device),
-                          #                        "X2": transform(Image.open(img02)).to(device)}
-                          # ,
-                          #                   "mnist_two_eights":
-                          #                       {"X1": transform(Image.open(img81)).to(device),
-                          #                        "X2": transform(Image.open(img82)).to(device)}
-                          # ,
-                          #                   "mnist_zero_eight":
-                          #                       {"X1": transform(Image.open(img01)).to(device),
-                          #                        "X2": transform(Image.open(img81)).to(device)}
                           }
-    results_dict_list = []
-    for key, val in sklearn_data_pairs.items():
-        logger.info(f"calculating sinkhorn distance with dataset pairs : {key}")
-        sh_dist = sinkhorn_wrapper(X1=val["X1"], X2=val["X2"])
-        results_dict_list.append({"data_pair_name": key, "sh_distance": sh_dist})
-        logger.info("***")
-    results_df = pd.DataFrame.from_records(data=results_dict_list)
-    logger.info(f"SH distances df = \n {results_df}")
+    # results_dict_list = []
+    # for key, val in sklearn_data_pairs.items():
+    #     logger.info(f"calculating sinkhorn distance with dataset pairs : {key}")
+    #     sh_dist = sinkhorn_wrapper(X1=val["X1"], X2=val["X2"])
+    #     results_dict_list.append({"data_pair_name": key, "sh_distance": sh_dist})
+    #     logger.info("***")
+    # results_df = pd.DataFrame.from_records(data=results_dict_list)
+    # logger.info(f"SH distances df = \n {results_df}")
 
     # Test over batches of data
-    # mnist_0_dataset = Dataset2(
-    #     folder="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0",
-    #     image_size=img_size)
-    # mnist_8_dataset = Dataset2(
-    #     folder="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8",
-    #     image_size=img_size)
-    # mnist_0_dl = DataLoader(dataset=mnist_0_dataset, batch_size=64, shuffle=True)
-    # mnist_8_dl = DataLoader(dataset=mnist_8_dataset, batch_size=64, shuffle=True)
-    #
-    # X01 = next(iter(mnist_0_dl)).to(device)
-    # X02 = next(iter(mnist_0_dl)).to(device)
-    # norm_ = torch.norm(X01 - X02)
-    # X81 = next(iter(mnist_8_dataset)).to(device)
-    # X82 = next(iter(mnist_8_dataset)).to(device)
-    # d = sinkhorn_wrapper(X1=X01, X2=X02)
-    # print(d)
+    mnist_0_dataset = Dataset2(
+        folder="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/0",
+        image_size=img_size)
+    mnist_8_dataset = Dataset2(
+        folder="../../denoising-diffusion-pytorch/denoising_diffusion_pytorch/mnist_image_samples/8",
+        image_size=img_size)
+    mnist_0_dl = DataLoader(dataset=mnist_0_dataset, batch_size=batch_size, shuffle=True)
+    mnist_8_dl = DataLoader(dataset=mnist_8_dataset, batch_size=batch_size, shuffle=True)
+
+    X01 = next(iter(mnist_0_dl)).to(device).squeeze().reshape(batch_size, img_size * img_size)
+    X02 = next(iter(mnist_0_dl)).to(device).squeeze().reshape(batch_size, img_size * img_size)
+    norm_ = torch.norm(X01 - X02)
+
+    d00 = sinkhorn_wrapper(X1=X01, X2=X02)
+    print(d00)
+
+    X81 = next(iter(mnist_8_dl)).to(device).squeeze().reshape(batch_size, img_size * img_size)
+    X82 = next(iter(mnist_8_dl)).to(device).squeeze().reshape(batch_size, img_size * img_size)
+    d88 = sinkhorn_wrapper(X1=X81, X2=X82)
+    print(d88)
+
+    d08 = sinkhorn_wrapper(X1=X01, X2=X81)
+    print(d08)
 # # Experiment with mnist datasets
 #
 #
