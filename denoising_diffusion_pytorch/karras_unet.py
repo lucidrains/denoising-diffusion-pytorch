@@ -1,9 +1,6 @@
 import math
-import copy
-from pathlib import Path
 from random import random
 from functools import partial
-from collections import namedtuple
 
 import torch
 from torch import nn, einsum
@@ -225,9 +222,9 @@ class KarrasUnet(nn.Module):
 
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
-            nn.Linear(fourier_dim, time_dim),
+            nn.Linear(fourier_dim, time_dim, bias = False),
             nn.GELU(),
-            nn.Linear(time_dim, time_dim)
+            nn.Linear(time_dim, time_dim, bias = False)
         )
 
         # attention
@@ -242,8 +239,6 @@ class KarrasUnet(nn.Module):
 
         assert len(full_attn) == len(dim_mults)
 
-        FullAttention = partial(Attention, flash = flash_attn)
-
         # layers
 
         self.downs = nn.ModuleList([])
@@ -256,13 +251,13 @@ class KarrasUnet(nn.Module):
             self.downs.append(nn.ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                FullAttention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads),
+                Attention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = FullAttention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
+        self.mid_attn = Attention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
@@ -271,8 +266,8 @@ class KarrasUnet(nn.Module):
             self.ups.append(nn.ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                FullAttention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads),
-                Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
+                Attention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
+                Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1, bias = False)
             ]))
 
         default_out_dim = channels * (1 if not learned_variance else 2)
