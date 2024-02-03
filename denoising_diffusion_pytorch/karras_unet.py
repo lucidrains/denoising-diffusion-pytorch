@@ -215,9 +215,9 @@ class CosineSimAttention(Module):
         hidden_dim = dim_head * heads
 
         self.norm = RMSNorm(dim)
-        self.attend = Attend(flash = flash)
 
-        self.temperatures = nn.Parameter(torch.zero(heads, 1, 1))
+        # equation (34) - they used cosine sim of queries and keys with a fixed scale of sqrt(Nc)
+        self.attend = Attend(flash = flash, scale = dim_head ** 0.5)
 
         self.mem_kv = nn.Parameter(torch.randn(2, heads, num_mem_kv, dim_head))
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
@@ -235,8 +235,6 @@ class CosineSimAttention(Module):
         k, v = map(partial(torch.cat, dim = -2), ((mk, k), (mv, v)))
 
         q, k = map(l2norm, (q, k))
-
-        q = q * self.temperature.exp() # unsure if they did learned temperature in paper
 
         out = self.attend(q, k, v)
 
