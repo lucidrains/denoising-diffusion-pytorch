@@ -35,6 +35,11 @@ def divisible_by(numer, denom):
 def identity(t, *args, **kwargs):
     return t
 
+# in paper, they use eps 1e-4 for pixelnorm
+
+def l2norm(t, dim = -1, eps = 1e-12):
+    return F.normalize(t, dim = dim, eps = eps)
+
 # small helper modules
 
 def Upsample(dim, dim_out = None):
@@ -196,7 +201,7 @@ class ResnetBlock(Module):
 
         return h + self.res_conv(x)
 
-class Attention(Module):
+class CosineSimAttention(Module):
     def __init__(
         self,
         dim,
@@ -212,6 +217,8 @@ class Attention(Module):
         self.norm = RMSNorm(dim)
         self.attend = Attend(flash = flash)
 
+        self.temperatures = nn.Parameter(torch.zero(heads, 1, 1))
+
         self.mem_kv = nn.Parameter(torch.randn(2, heads, num_mem_kv, dim_head))
         self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
         self.to_out = nn.Conv2d(hidden_dim, dim, 1, bias = False)
@@ -226,6 +233,10 @@ class Attention(Module):
 
         mk, mv = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), self.mem_kv)
         k, v = map(partial(torch.cat, dim = -2), ((mk, k), (mv, v)))
+
+        q, k = map(l2norm, (q, k))
+
+        q = q * self.temperature.exp() # unsure if they did learned temperature in paper
 
         out = self.attend(q, k, v)
 
@@ -314,13 +325,13 @@ class KarrasUnet(Module):
             self.downs.append(ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                Attention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
+                CosineSimAttention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
         self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = Attention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
+        self.mid_attn = CosineSimAttention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
         self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
@@ -329,7 +340,7 @@ class KarrasUnet(Module):
             self.ups.append(ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                Attention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
+                CosineSimAttention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1, bias = False)
             ]))
 
