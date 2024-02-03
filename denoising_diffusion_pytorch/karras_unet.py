@@ -61,6 +61,16 @@ def sin(t):
 def cos(t):
     return torch.cos(t) * (2 ** 0.5)
 
+# gain - layer scaling
+
+class Gain(Module):
+    def __init__(self):
+        super().__init__()
+        self.gain = nn.Parameter(torch.tensor(0.))
+
+    def forward(self, x):
+        return x * self.gain
+
 # norm
 
 class RMSNorm(Module):
