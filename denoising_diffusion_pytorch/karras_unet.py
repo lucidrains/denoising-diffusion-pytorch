@@ -9,7 +9,7 @@ from torch.nn import Module, ModuleList
 from torch.cuda.amp import autocast
 import torch.nn.functional as F
 
-from einops import rearrange, reduce, repeat
+from einops import rearrange, reduce, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
 from denoising_diffusion_pytorch.attend import Attend
@@ -23,6 +23,12 @@ def default(val, d):
     if exists(val):
         return val
     return d() if callable(d) else d
+
+def pack_one(t, pattern):
+    return pack([t], pattern)
+
+def unpack_one(t, ps, pattern):
+    return unpack(t, ps, pattern)[0]
 
 def cast_tuple(t, length = 1):
     if isinstance(t, tuple):
@@ -126,6 +132,47 @@ class PixelNorm(Module):
     def forward(self, x):
         dim = self.dim
         return l2norm(x, dim = dim, eps = self.eps) * sqrt(x.shape[dim])
+
+# forced weight normed conv2d and linear
+# algorithm 1 in paper
+
+class WeightNormedConv2d(Module):
+    def __init__(self, dim_in, dim_out, kernel_size, eps = 1e-4):
+        super().__init__()
+        weight = torch.randn(dim_out, dim_in, kernel_size, kernel_size)
+        self.weight = nn.Parameter(weight)
+
+        self.eps = eps
+        self.fan_in = dim_in * kernel_size ** 2
+
+    def forward(self, x):
+        if self.training:
+            with torch.no_grad():
+                weight, ps = pack_one(self.weight, 'o *')
+                normed_weight = l2norm(weight, eps = self.eps)
+                normed_weight = unpack_one(normed_weight, ps, 'o *')
+                self.weight.copy_(normed_weight)
+
+        weight = l2norm(self.weight, eps = self.eps) / sqrt(self.fan_in)
+        return F.conv2d(x, weight, padding='same')
+
+class WeightNormedLinear(Module):
+    def __init__(self, dim_in, dim_out, eps = 1e-4):
+        super().__init__()
+        weight = torch.randn(dim_out, dim_in)
+        self.weight = nn.Parameter(weight)
+        self.eps = eps
+        self.fan_in = dim_in
+
+    def forward(self, x):
+        if self.training:
+            with torch.no_grad():
+                normed_weight = l2norm(self.weight, eps = self.eps)
+                self.weight.copy_(normed_weight)
+
+        weight = l2norm(self.weight, eps = self.eps) / sqrt(self.fan_in)
+        return F.linear(x, weight)
+
 # norm
 
 class RMSNorm(Module):
