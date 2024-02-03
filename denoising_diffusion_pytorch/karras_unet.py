@@ -113,6 +113,19 @@ class MPSum(Module):
         den = sqrt((1 - t) ** 2 + t ** 2)
         return num / den
 
+# pixelnorm
+# equation (30)
+
+class PixelNorm(Module):
+    def __init__(self, dim, eps = 1e-4):
+        super().__init__()
+        # high epsilon for the pixel norm in the paper
+        self.dim = dim
+        self.eps = eps
+
+    def forward(self, x):
+        dim = self.dim
+        return l2norm(x, dim = dim, eps = self.eps) * sqrt(x.shape[dim])
 # norm
 
 class RMSNorm(Module):
