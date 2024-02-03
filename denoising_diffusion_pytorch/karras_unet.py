@@ -85,12 +85,28 @@ class MPCat(Module):
         dim, t = self.dim, self.t
         Na, Nb = a.shape[dim], b.shape[dim]
 
-        C = sqrt((Na + Nb) / ((1 - t) ** 2 + t ** 2))
+        C = sqrt((Na + Nb) / ((1. - t) ** 2 + t ** 2))
 
-        a = a * (1 - t) / sqrt(Na)
+        a = a * (1. - t) / sqrt(Na)
         b = b * t / sqrt(Nb)
 
         return C * torch.cat((a, b), dim = dim)
+
+# magnitude preserving sum
+# equation (88)
+# empirically, they found t=0.3 for encoder / decoder / attention residuals
+# and for embedding, t=0.5
+
+class MPSum(Module):
+    def __init__(self, t):
+        super().__init__()
+        self.t = t
+
+    def forward(self, x, res):
+        a, b, t = x, res, self.t
+        num = a * (1. - t) + b * t
+        den = sqrt((1 - t) ** 2 + t ** 2)
+        return num / den
 
 # norm
 
