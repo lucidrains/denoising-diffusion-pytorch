@@ -225,12 +225,11 @@ class Block(Module):
         self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1, bias = False)
         self.act = MPSiLU()
 
-    def forward(self, x, scale_shift = None):
+    def forward(self, x, scale = None):
         x = self.proj(x)
 
-        if exists(scale_shift):
-            scale, shift = scale_shift
-            x = x * (scale + 1) + shift
+        if exists(scale):
+            x = x * (scale + 1)
 
         x = self.act(x)
         return x
@@ -249,13 +248,12 @@ class ResnetBlock(Module):
 
     def forward(self, x, time_emb = None):
 
-        scale_shift = None
+        scale = None
         if exists(self.mlp) and exists(time_emb):
-            time_emb = self.mlp(time_emb)
-            time_emb = rearrange(time_emb, 'b c -> b c 1 1')
-            scale_shift = time_emb.chunk(2, dim = 1)
+            scale = self.mlp(time_emb)
+            scale = rearrange(scale, 'b c -> b c 1 1')
 
-        h = self.block1(x, scale_shift = scale_shift)
+        h = self.block1(x, scale = scale)
 
         h = self.block2(h)
 
