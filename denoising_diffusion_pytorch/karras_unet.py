@@ -1,4 +1,5 @@
 import math
+from math import sqrt
 from random import random
 from functools import partial
 
@@ -70,6 +71,26 @@ class Gain(Module):
 
     def forward(self, x):
         return x * self.gain
+
+# magnitude preserving concat
+# equation (103) - default to 0.5, which they recommended
+
+class MPCat(Module):
+    def __init__(self, t = 0.5, dim = -1):
+        super().__init__()
+        self.t = t
+        self.dim = dim
+
+    def forward(self, a, b):
+        dim, t = self.dim, self.t
+        Na, Nb = a.shape[dim], b.shape[dim]
+
+        C = sqrt((Na + Nb) / ((1 - t) ** 2 + t ** 2))
+
+        a = a * (1 - t) / sqrt(Na)
+        b = b * t / sqrt(Nb)
+
+        return C * torch.cat((a, b), dim = dim)
 
 # norm
 
