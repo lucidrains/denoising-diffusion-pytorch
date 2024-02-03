@@ -4,6 +4,7 @@ from functools import partial
 
 import torch
 from torch import nn, einsum
+from torch.nn import Module, ModuleList
 from torch.cuda.amp import autocast
 import torch.nn.functional as F
 
@@ -47,7 +48,22 @@ def Downsample(dim, dim_out = None):
         nn.Conv2d(dim * 4, default(dim_out, dim), 1, bias = False)
     )
 
-class RMSNorm(nn.Module):
+# mp activations
+# section 2.5
+
+class MPSiLU(Module):
+    def forward(self, x):
+        return F.silu(x) / 0.596
+
+def sin(t):
+    return torch.sin(t) * (2 ** 0.5)
+
+def cos(t):
+    return torch.cos(t) * (2 ** 0.5)
+
+# norm
+
+class RMSNorm(Module):
     def __init__(self, dim):
         super().__init__()
         self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
@@ -57,7 +73,7 @@ class RMSNorm(nn.Module):
 
 # sinusoidal positional embeds
 
-class SinusoidalPosEmb(nn.Module):
+class SinusoidalPosEmb(Module):
     def __init__(self, dim, theta = 10000):
         super().__init__()
         self.dim = dim
@@ -69,10 +85,10 @@ class SinusoidalPosEmb(nn.Module):
         emb = math.log(self.theta) / (half_dim - 1)
         emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
         emb = x[:, None] * emb[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        emb = torch.cat((sin(emb), cos(emb)), dim=-1)
         return emb
 
-class RandomOrLearnedSinusoidalPosEmb(nn.Module):
+class RandomOrLearnedSinusoidalPosEmb(Module):
     """ following @crowsonkb 's lead with random (learned optional) sinusoidal pos emb """
     """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
 
@@ -91,11 +107,11 @@ class RandomOrLearnedSinusoidalPosEmb(nn.Module):
 
 # building block modules
 
-class Block(nn.Module):
+class Block(Module):
     def __init__(self, dim, dim_out, groups = 8):
         super().__init__()
         self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1, bias = False)
-        self.act = nn.SiLU()
+        self.act = MPSiLU()
 
     def forward(self, x, scale_shift = None):
         x = self.proj(x)
@@ -107,11 +123,11 @@ class Block(nn.Module):
         x = self.act(x)
         return x
 
-class ResnetBlock(nn.Module):
+class ResnetBlock(Module):
     def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
         super().__init__()
         self.mlp = nn.Sequential(
-            nn.SiLU(),
+            MPSiLU(),
             nn.Linear(time_emb_dim, dim_out * 2, bias = False)
         ) if exists(time_emb_dim) else None
 
@@ -133,7 +149,7 @@ class ResnetBlock(nn.Module):
 
         return h + self.res_conv(x)
 
-class Attention(nn.Module):
+class Attention(Module):
     def __init__(
         self,
         dim,
@@ -171,7 +187,7 @@ class Attention(nn.Module):
 
 # model
 
-class KarrasUnet(nn.Module):
+class KarrasUnet(Module):
     def __init__(
         self,
         dim,
@@ -241,14 +257,14 @@ class KarrasUnet(nn.Module):
 
         # layers
 
-        self.downs = nn.ModuleList([])
-        self.ups = nn.ModuleList([])
+        self.downs = ModuleList([])
+        self.ups = ModuleList([])
         num_resolutions = len(in_out)
 
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(in_out, full_attn, attn_heads, attn_dim_head)):
             is_last = ind >= (num_resolutions - 1)
 
-            self.downs.append(nn.ModuleList([
+            self.downs.append(ModuleList([
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 block_klass(dim_in, dim_in, time_emb_dim = time_dim),
                 Attention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
@@ -263,7 +279,7 @@ class KarrasUnet(nn.Module):
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
             is_last = ind == (len(in_out) - 1)
 
-            self.ups.append(nn.ModuleList([
+            self.ups.append(ModuleList([
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 Attention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
