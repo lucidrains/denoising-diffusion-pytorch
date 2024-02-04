@@ -284,7 +284,7 @@ class CosineSimAttention(Module):
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        self.norm = RMSNorm(dim)
+        self.pixel_norm = PixelNorm(dim = 1)
 
         # equation (34) - they used cosine sim of queries and keys with a fixed scale of sqrt(Nc)
         self.attend = Attend(flash = flash, scale = dim_head ** 0.5)
@@ -296,13 +296,13 @@ class CosineSimAttention(Module):
     def forward(self, x):
         b, c, h, w = x.shape
 
-        x = self.norm(x)
-
         qkv = self.to_qkv(x).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h (x y) c', h = self.heads), qkv)
 
         mk, mv = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), self.mem_kv)
         k, v = map(partial(torch.cat, dim = -2), ((mk, k), (mv, v)))
+
+        q, k, v = map(self.pixel_norm, (q, k, v))
 
         q, k = map(l2norm, (q, k))
 
