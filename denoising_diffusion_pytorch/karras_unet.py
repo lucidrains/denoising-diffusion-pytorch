@@ -236,31 +236,46 @@ class RandomOrLearnedSinusoidalPosEmb(Module):
 # building block modules
 
 class Block(Module):
-    def __init__(self, dim, dim_out, groups = 8):
+    def __init__(
+        self,
+        dim,
+        dim_out,
+        mp_sum_t = 0.3
+    ):
         super().__init__()
-        self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1, bias = False)
+        self.proj = WeightNormedConv2d(dim, dim_out, 3)
         self.act = MPSiLU()
+        self.mp_add = MPSum(t = mp_sum_t)
 
     def forward(self, x, scale = None):
+        res = x
+
         x = self.proj(x)
 
         if exists(scale):
             x = x * (scale + 1)
 
         x = self.act(x)
-        return x
+
+        return mp_add(x, res)
 
 class ResnetBlock(Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
+    def __init__(
+        self,
+        dim,
+        dim_out,
+        *,
+        time_emb_dim = None
+    ):
         super().__init__()
         self.mlp = nn.Sequential(
             MPSiLU(),
-            nn.Linear(time_emb_dim, dim_out * 2, bias = False)
+            nn.Linear(time_emb_dim, dim_out, bias = False)
         ) if exists(time_emb_dim) else None
 
         self.block1 = Block(dim, dim_out, groups = groups)
         self.block2 = Block(dim_out, dim_out, groups = groups)
-        self.res_conv = nn.Conv2d(dim, dim_out, 1, bias = False) if dim != dim_out else nn.Identity()
+        self.res_conv = WeightNormedConv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb = None):
 
@@ -282,7 +297,8 @@ class CosineSimAttention(Module):
         heads = 4,
         dim_head = 32,
         num_mem_kv = 4,
-        flash = False
+        flash = False,
+        mp_sum_t = 0.3
     ):
         super().__init__()
         self.heads = heads
@@ -294,11 +310,13 @@ class CosineSimAttention(Module):
         self.attend = Attend(flash = flash, scale = dim_head ** 0.5)
 
         self.mem_kv = nn.Parameter(torch.randn(2, heads, num_mem_kv, dim_head))
-        self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias = False)
-        self.to_out = nn.Conv2d(hidden_dim, dim, 1, bias = False)
+        self.to_qkv = WeightNormedConv2d(dim, hidden_dim * 3, 1)
+        self.to_out = WeightNormedConv2d(hidden_dim, dim, 1)
+
+        self.mp_add = MPSum(t = mp_sum_t)
 
     def forward(self, x):
-        b, c, h, w = x.shape
+        res, b, c, h, w = x, *x.shape
 
         qkv = self.to_qkv(x).chunk(3, dim = 1)
         q, k, v = map(lambda t: rearrange(t, 'b (h c) x y -> b h (x y) c', h = self.heads), qkv)
@@ -313,7 +331,9 @@ class CosineSimAttention(Module):
         out = self.attend(q, k, v)
 
         out = rearrange(out, 'b h (x y) d -> b (h d) x y', x = h, y = w)
-        return self.to_out(out)
+        out = self.to_out(out)
+
+        return self.mp_add(out, res)
 
 # model
 
@@ -346,7 +366,7 @@ class KarrasUnet(Module):
         input_channels = channels * (2 if self_condition else 1)
 
         init_dim = default(init_dim, dim)
-        self.init_conv = nn.Conv2d(input_channels, init_dim, 7, padding = 3)
+        self.init_conv = WeightNormedConv2d(input_channels, init_dim, 7, concat_ones_to_input = True)
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -420,7 +440,7 @@ class KarrasUnet(Module):
         self.out_dim = default(out_dim, default_out_dim)
 
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
-        self.final_conv = nn.Conv2d(dim, self.out_dim, 1, bias = False)
+        self.final_conv = WeightNormedConv2d(dim, self.out_dim, 1)
 
     @property
     def downsample_factor(self):
