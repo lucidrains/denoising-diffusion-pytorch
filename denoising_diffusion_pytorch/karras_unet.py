@@ -59,6 +59,8 @@ class Downsample(Module):
 
     def forward(self, x):
         h, w = x.shape[-2:]
+        assert all([divisible_by(_, 2) for _ in (h, w)])
+
         x = F.interpolate(x, (h // 2, w // 2), mode = 'bilinear')
         x = self.conv(x)
         x = self.pixel_norm(x)
@@ -355,7 +357,8 @@ class KarrasUnet(Module):
         attn_dim_head = 32,
         attn_heads = 4,
         full_attn = None,    # defaults to full attention only for inner most layer
-        flash_attn = False
+        flash_attn = False,
+        mp_cat_t = 0.5
     ):
         super().__init__()
 
@@ -410,6 +413,8 @@ class KarrasUnet(Module):
         self.downs = ModuleList([])
         self.ups = ModuleList([])
         num_resolutions = len(in_out)
+
+        self.mp_cat = MPCat(t = mp_cat_t, dim = 1)
 
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(in_out, full_attn, attn_heads, attn_dim_head)):
             is_last = ind >= (num_resolutions - 1)
@@ -475,10 +480,10 @@ class KarrasUnet(Module):
         x = self.mid_block2(x, t)
 
         for block1, block2, attn, upsample in self.ups:
-            x = torch.cat((x, h.pop()), dim = 1)
+            x = self.mp_cat(x, h.pop())
             x = block1(x, t)
 
-            x = torch.cat((x, h.pop()), dim = 1)
+            x = self.mp_cat(x, h.pop())
             x = block2(x, t)
             x = attn(x) + x
 
