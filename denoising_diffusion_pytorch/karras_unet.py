@@ -137,13 +137,21 @@ class PixelNorm(Module):
 # algorithm 1 in paper
 
 class WeightNormedConv2d(Module):
-    def __init__(self, dim_in, dim_out, kernel_size, eps = 1e-4):
+    def __init__(
+        self,
+        dim_in,
+        dim_out,
+        kernel_size,
+        eps = 1e-4,
+        concat_ones_to_input = False   # they use this in the input block to protect against loss of expressivity due to removal of all biases, even though they claim they observed none
+    ):
         super().__init__()
-        weight = torch.randn(dim_out, dim_in, kernel_size, kernel_size)
+        weight = torch.randn(dim_out, dim_in + int(concat_ones_to_input), kernel_size, kernel_size)
         self.weight = nn.Parameter(weight)
 
         self.eps = eps
         self.fan_in = dim_in * kernel_size ** 2
+        self.concat_ones_to_input = concat_ones_to_input
 
     def forward(self, x):
         if self.training:
@@ -154,6 +162,10 @@ class WeightNormedConv2d(Module):
                 self.weight.copy_(normed_weight)
 
         weight = l2norm(self.weight, eps = self.eps) / sqrt(self.fan_in)
+
+        if self.concat_ones_to_input:
+            x = F.pad(x, (0, 0, 0, 0, 1, 0), value = 1.)
+
         return F.conv2d(x, weight, padding='same')
 
 class WeightNormedLinear(Module):
