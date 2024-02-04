@@ -49,16 +49,20 @@ def l2norm(t, dim = -1, eps = 1e-12):
 # small helper modules
 
 def Upsample(dim, dim_out = None):
-    return nn.Sequential(
-        nn.Upsample(scale_factor = 2, mode = 'nearest'),
-        nn.Conv2d(dim, default(dim_out, dim), 3, padding = 1, bias = False)
-    )
+    return nn.Upsample(scale_factor = 2, mode = 'bilinear')
 
-def Downsample(dim, dim_out = None):
-    return nn.Sequential(
-        Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1 = 2, p2 = 2),
-        nn.Conv2d(dim * 4, default(dim_out, dim), 1, bias = False)
-    )
+class Downsample(Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.conv = WeightNormedConv2d(dim, dim, 1)
+        self.pixel_norm = PixelNorm(dim = 1)
+
+    def forward(self, x):
+        h, w = x.shape[-2:]
+        x = F.interpolate(x, (h // 2, w // 2), mode = 'bilinear')
+        x = self.conv(x)
+        x = self.pixel_norm(x)
+        return x
 
 # mp activations
 # section 2.5
