@@ -73,12 +73,6 @@ class MPSiLU(Module):
     def forward(self, x):
         return F.silu(x) / 0.596
 
-def sin(t):
-    return torch.sin(t) * (2 ** 0.5)
-
-def cos(t):
-    return torch.cos(t) * (2 ** 0.5)
-
 # gain - layer scaling
 
 class Gain(Module):
@@ -218,22 +212,18 @@ class SinusoidalPosEmb(Module):
         emb = torch.cat((sin(emb), cos(emb)), dim=-1)
         return emb
 
-class RandomOrLearnedSinusoidalPosEmb(Module):
-    """ following @crowsonkb 's lead with random (learned optional) sinusoidal pos emb """
-    """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
+class MPFourierEmbedding(Module):
 
-    def __init__(self, dim, is_random = False):
+    def __init__(self, dim):
         super().__init__()
         assert divisible_by(dim, 2)
         half_dim = dim // 2
-        self.weights = nn.Parameter(torch.randn(half_dim), requires_grad = not is_random)
+        self.weights = nn.Parameter(torch.randn(half_dim), requires_grad = False)
 
     def forward(self, x):
         x = rearrange(x, 'b -> b 1')
         freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * math.pi
-        fouriered = torch.cat((freqs.sin(), freqs.cos()), dim = -1)
-        fouriered = torch.cat((x, fouriered), dim = -1)
-        return fouriered
+        return torch.cat((freqs.sin(), freqs.cos()), dim = -1) * (2 ** 0.5)
 
 # building block modules
 
@@ -349,11 +339,8 @@ class KarrasUnet(Module):
         channels = 3,
         self_condition = False,
         resnet_block_groups = 8,
-        learned_variance = False,
-        learned_sinusoidal_cond = False,
-        random_fourier_features = False,
-        learned_sinusoidal_dim = 16,
-        sinusoidal_pos_emb_theta = 10000,
+        sinusoidal_dim = 16,
+        fourier_theta = 10000,
         attn_dim_head = 32,
         attn_heads = 4,
         full_attn = None,    # defaults to full attention only for inner most layer
@@ -380,14 +367,8 @@ class KarrasUnet(Module):
 
         time_dim = dim * 4
 
-        self.random_or_learned_sinusoidal_cond = learned_sinusoidal_cond or random_fourier_features
-
-        if self.random_or_learned_sinusoidal_cond:
-            sinu_pos_emb = RandomOrLearnedSinusoidalPosEmb(learned_sinusoidal_dim, random_fourier_features)
-            fourier_dim = learned_sinusoidal_dim + 1
-        else:
-            sinu_pos_emb = SinusoidalPosEmb(dim, theta = sinusoidal_pos_emb_theta)
-            fourier_dim = dim
+        sinu_pos_emb = MPFourierEmbedding(sinusoidal_dim)
+        fourier_dim = sinusoidal_dim
 
         self.time_mlp = nn.Sequential(
             sinu_pos_emb,
