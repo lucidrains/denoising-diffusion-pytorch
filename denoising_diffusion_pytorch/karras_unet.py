@@ -38,9 +38,6 @@ def cast_tuple(t, length = 1):
 def divisible_by(numer, denom):
     return (numer % denom) == 0
 
-def identity(t, *args, **kwargs):
-    return t
-
 # in paper, they use eps 1e-4 for pixelnorm
 
 def l2norm(t, dim = -1, eps = 1e-12):
@@ -48,7 +45,7 @@ def l2norm(t, dim = -1, eps = 1e-12):
 
 # small helper modules
 
-def Upsample(dim, dim_out = None):
+def Upsample(dim):
     return nn.Upsample(scale_factor = 2, mode = 'bilinear')
 
 class Downsample(Module):
@@ -185,35 +182,9 @@ class WeightNormedLinear(Module):
         weight = l2norm(self.weight, eps = self.eps) / sqrt(self.fan_in)
         return F.linear(x, weight)
 
-# norm
-
-class RMSNorm(Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
-
-    def forward(self, x):
-        return F.normalize(x, dim = 1) * self.g * (x.shape[1] ** 0.5)
-
-# sinusoidal positional embeds
-
-class SinusoidalPosEmb(Module):
-    def __init__(self, dim, theta = 10000):
-        super().__init__()
-        self.dim = dim
-        self.theta = theta
-
-    def forward(self, x):
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(self.theta) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x[:, None] * emb[None, :]
-        emb = torch.cat((sin(emb), cos(emb)), dim=-1)
-        return emb
+# mp fourier embeds
 
 class MPFourierEmbedding(Module):
-
     def __init__(self, dim):
         super().__init__()
         assert divisible_by(dim, 2)
@@ -265,8 +236,8 @@ class ResnetBlock(Module):
             nn.Linear(time_emb_dim, dim_out, bias = False)
         ) if exists(time_emb_dim) else None
 
-        self.block1 = Block(dim, dim_out, groups = groups)
-        self.block2 = Block(dim_out, dim_out, groups = groups)
+        self.block1 = Block(dim, dim_out)
+        self.block2 = Block(dim_out, dim_out)
         self.res_conv = WeightNormedConv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb = None):
@@ -338,7 +309,6 @@ class KarrasUnet(Module):
         dim_mults = (1, 2, 4, 8),
         channels = 3,
         self_condition = False,
-        resnet_block_groups = 8,
         sinusoidal_dim = 16,
         fourier_theta = 10000,
         attn_dim_head = 32,
@@ -360,8 +330,6 @@ class KarrasUnet(Module):
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
-
-        block_klass = partial(ResnetBlock, groups = resnet_block_groups)
 
         # time embeddings
 
@@ -401,31 +369,31 @@ class KarrasUnet(Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(ModuleList([
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
-                block_klass(dim_in, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
                 CosineSimAttention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
-                Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
+                Downsample(dim_in, dim_out) if not is_last else WeightNormedConv2d(dim_in, dim_out, 3)
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
         self.mid_attn = CosineSimAttention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
-        self.mid_block2 = block_klass(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
 
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
             is_last = ind == (len(in_out) - 1)
 
             self.ups.append(ModuleList([
-                block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                block_klass(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 CosineSimAttention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
-                Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1, bias = False)
+                Upsample(dim_out, dim_in) if not is_last else  WeightNormedConv2d(dim_out, dim_in, 3)
             ]))
 
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = block_klass(dim * 2, dim, time_emb_dim = time_dim)
+        self.final_res_block = ResnetBlock(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = WeightNormedConv2d(dim, self.out_dim, 1)
 
     @property
