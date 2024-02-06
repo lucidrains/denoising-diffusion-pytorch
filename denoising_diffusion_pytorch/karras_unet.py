@@ -1,16 +1,13 @@
 import math
 from math import sqrt, ceil
-from random import random
 from functools import partial
 
 import torch
 from torch import nn, einsum
 from torch.nn import Module, ModuleList
-from torch.cuda.amp import autocast
 import torch.nn.functional as F
 
-from einops import rearrange, reduce, repeat, pack, unpack
-from einops.layers.torch import Rearrange
+from einops import rearrange, repeat, pack, unpack
 
 from denoising_diffusion_pytorch.attend import Attend
 
