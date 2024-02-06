@@ -368,8 +368,7 @@ class Attention(Module):
 
         self.pixel_norm = PixelNorm(dim = 1)
 
-        # equation (34) - they used cosine sim of queries and keys with a fixed scale of sqrt(Nc)
-        self.attend = Attend(flash = flash, scale = sqrt(dim_head))
+        self.attend = Attend(flash = flash)
 
         self.mem_kv = nn.Parameter(torch.randn(2, heads, num_mem_kv, dim_head))
         self.to_qkv = Conv2d(dim, hidden_dim * 3, 1)
@@ -387,8 +386,6 @@ class Attention(Module):
         k, v = map(partial(torch.cat, dim = -2), ((mk, k), (mv, v)))
 
         q, k, v = map(self.pixel_norm, (q, k, v))
-
-        q, k = map(l2norm, (q, k))
 
         out = self.attend(q, k, v)
 
