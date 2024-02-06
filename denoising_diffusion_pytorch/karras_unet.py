@@ -27,6 +27,9 @@ def default(val, d):
 def xnor(x, y):
     return not (x ^ y)
 
+def append(arr, el):
+    arr.append(el)
+
 def prepend(arr, el):
     arr.insert(0, el)
 
@@ -195,6 +198,8 @@ class Encoder(Module):
         mp_add_t = 0.3,
         has_attn = False,
         attn_dim_head = 64,
+        attn_res_mp_add_t = 0.3,
+        attn_flash = False,
         downsample = False
     ):
         super().__init__()
@@ -203,8 +208,10 @@ class Encoder(Module):
         self.downsample = downsample
         self.downsample_conv = None
 
+        curr_dim = dim
         if downsample:
-            self.downsample_conv = Conv2d(dim, dim_out, 1)
+            self.downsample_conv = Conv2d(curr_dim, dim_out, 1)
+            curr_dim = dim_out
 
         self.pixel_norm = PixelNorm(dim = 1)
 
@@ -217,7 +224,7 @@ class Encoder(Module):
 
         self.block1 = nn.Sequential(
             MPSiLU(),
-            Conv2d(dim, dim_out, 3)
+            Conv2d(curr_dim, dim_out, 3)
         )
 
         self.block2 = nn.Sequential(
@@ -231,9 +238,11 @@ class Encoder(Module):
         self.attn = None
         if has_attn:
             self.attn = Attention(
-                dim = dim,
-                heads = ceil(dim / attn_dim_head),
-                dim_head = attn_dim_head
+                dim = dim_out,
+                heads = ceil(dim_out / attn_dim_head),
+                dim_head = attn_dim_head,
+                mp_add_t = attn_res_mp_add_t,
+                flash = attn_flash
             )
 
     def forward(
@@ -254,7 +263,7 @@ class Encoder(Module):
 
         if exists(emb):
             scale = self.to_emb(emb) + 1
-            x = x * scale
+            x = x * rearrange(scale, 'b c -> b c 1 1')
 
         x = self.block2(x)
 
@@ -276,12 +285,15 @@ class Decoder(Module):
         mp_add_t = 0.3,
         has_attn = False,
         attn_dim_head = 64,
+        attn_res_mp_add_t = 0.3,
+        attn_flash = False,
         upsample = False
     ):
         super().__init__()
         dim_out = default(dim_out, dim)
 
         self.upsample = upsample
+        self.needs_skip = not upsample
 
         self.to_emb = None
         if exists(emb_dim):
@@ -308,9 +320,11 @@ class Decoder(Module):
         self.attn = None
         if has_attn:
             self.attn = Attention(
-                dim = dim,
-                heads = ceil(dim / attn_dim_head),
-                dim_head = attn_dim_head
+                dim = dim_out,
+                heads = ceil(dim_out / attn_dim_head),
+                dim_head = attn_dim_head,
+                mp_add_t = attn_res_mp_add_t,
+                flash = attn_flash
             )
 
     def forward(
@@ -318,6 +332,10 @@ class Decoder(Module):
         x,
         emb = None
     ):
+        if self.upsample:
+            h, w = x.shape[-2:]
+            x = F.interpolate(x, (h * 2, w * 2), mode = 'bilinear')
+
         res = self.res_conv(x)
 
         x = self.block1(x)
@@ -345,7 +363,7 @@ class Attention(Module):
         dim_head = 64,
         num_mem_kv = 4,
         flash = False,
-        mp_sum_t = 0.3
+        mp_add_t = 0.3
     ):
         super().__init__()
         self.heads = heads
@@ -360,7 +378,7 @@ class Attention(Module):
         self.to_qkv = Conv2d(dim, hidden_dim * 3, 1)
         self.to_out = Conv2d(hidden_dim, dim, 1)
 
-        self.mp_add = MPAdd(t = mp_sum_t)
+        self.mp_add = MPAdd(t = mp_add_t)
 
     def forward(self, x):
         res, b, c, h, w = x, *x.shape
@@ -406,8 +424,8 @@ class KarrasUnet(Module):
         attn_flash = False,
         mp_cat_t = 0.5,
         mp_add_emb_t = 0.5,
-        attn_mp_sum_t = 0.3,
-        resnet_mp_sum_t = 0.3,
+        attn_res_mp_add_t = 0.3,
+        resnet_mp_add_t = 0.3,
         dropout = 0.1,
         self_condition = False
     ):
@@ -457,72 +475,73 @@ class KarrasUnet(Module):
 
         # attention
 
-        attn_kwargs = dict(
-            flash = attn_flash,
-            dim_head = attn_dim_head,
-            mp_sum_t = attn_mp_sum_t
-        )
-
-        attn_res = cast_tuple(attn_res)
+        attn_res = set(cast_tuple(attn_res))
 
         # resnet block
 
         block_kwargs = dict(
             dropout = dropout,
-            emb_dim = emb_dim
+            emb_dim = emb_dim,
+            attn_dim_head = attn_dim_head,
+            attn_res_mp_add_t = attn_res_mp_add_t,
+            attn_flash = attn_flash
         )
 
         # unet encoder and decoders
 
-        stages = num_downsamples + 1
         self.downs = ModuleList([])
         self.ups = ModuleList([])
 
         curr_dim = dim
         curr_res = image_size
 
-        stage_dims = [dim]
-
-        skip_dims = [dim]
         self.skip_mp_cat = MPCat(t = mp_cat_t, dim = 1)
 
-        # take care of skip connection for initial input block
+        # take care of skip connection for initial input block and first three encoder blocks
 
-        prepend(self.ups, Decoder(dim + skip_dims.pop(), dim, **block_kwargs))
+        prepend(self.ups, Decoder(dim * 2, dim, **block_kwargs))
+
+        assert num_blocks_per_stage >= 1
+
+        for _ in range(num_blocks_per_stage):
+            enc = Encoder(curr_dim, curr_dim, **block_kwargs)
+            dec = Decoder(curr_dim * 2, curr_dim, **block_kwargs)
+
+            append(self.downs, enc)
+            prepend(self.ups, dec)
 
         # stages
 
-        return
+        for _ in range(self.num_downsamples):
+            dim_out = min(dim_max, curr_dim * 2)
+            upsample = Decoder(dim_out, curr_dim, has_attn = curr_res in attn_res, upsample = True, **block_kwargs)
 
-        for stage in range(stages):
-            is_last = stage == (stages - 1)
-            downsample = not is_last
+            curr_res //= 2
             has_attn = curr_res in attn_res
 
-            if downsample:
-                dim_out = min(curr_dim * 2, dim_max)
+            downsample = Encoder(curr_dim, dim_out, downsample = True, has_attn = has_attn, **block_kwargs)
 
-            self.downs.append(ModuleList([
-                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
-                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
-                Attention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
-                Downsample(dim_in, dim_out) if not is_last else Conv2d(dim_in, dim_out, 3)
-            ]))
+            append(self.downs, downsample)
+            prepend(self.ups, upsample)
+            prepend(self.ups, Decoder(dim_out * 2, dim_out, has_attn = has_attn, **block_kwargs))
 
-            if downsample:
-                curr_res //= 2
-                curr_dim = dim_out
-                stage_dims.append(dim_out)
+            for _ in range(num_blocks_per_stage):
+                enc = Encoder(dim_out, dim_out, has_attn = has_attn, **block_kwargs)
+                dec = Decoder(dim_out * 2, dim_out, has_attn = has_attn, **block_kwargs)
 
-        for stage in range(stages):
-            is_first = stage == 0
+                append(self.downs, enc)
+                prepend(self.ups, dec)
 
-            self.ups.append(ModuleList([
-                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                Attention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
-                Upsample(dim_out, dim_in) if not is_last else  Conv2d(dim_out, dim_in, 3)
-            ]))
+            curr_dim = dim_out
+
+        # take care of the two middle decoders
+
+        mid_has_attn = curr_res in attn_res
+
+        self.mids = ModuleList([
+            Decoder(curr_dim, curr_dim, has_attn = mid_has_attn, **block_kwargs),
+            Decoder(curr_dim, curr_dim, has_attn = mid_has_attn, **block_kwargs),
+        ])
 
     @property
     def downsample_factor(self):
@@ -582,12 +601,44 @@ class KarrasUnet(Module):
 
         # down
 
+        for encoder in self.downs:
+            x = encoder(x, emb = emb)
+            skips.append(x)
+
+        # mid
+
+        for decoder in self.mids:
+            x = decoder(x, emb = emb)
+
         # up
 
         for decoder in self.ups:
-            x = self.skip_mp_cat(x, skips.pop())
+            if decoder.needs_skip:
+                skip = skips.pop()
+                x = self.skip_mp_cat(x, skip)
+
             x = decoder(x, emb = emb)
 
         # output block
 
         return self.output_block(x)
+
+# example
+
+if __name__ == '__main__':
+    unet = KarrasUnet(
+        image_size = 64,
+        dim = 192,
+        dim_max = 768,
+        num_classes = 1000,
+    )
+
+    images = torch.randn(2, 4, 64, 64)
+
+    denoised_images = unet(
+        images,
+        time = torch.ones(2,),
+        class_labels = torch.randint(0, 1000, (2,))
+    )
+
+    assert denoised_images.shape == images.shape
