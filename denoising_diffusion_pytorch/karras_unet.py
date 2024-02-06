@@ -240,7 +240,7 @@ class Encoder(Module):
         if has_attn:
             self.attn = Attention(
                 dim = dim_out,
-                heads = ceil(dim_out / attn_dim_head),
+                heads = max(ceil(dim_out / attn_dim_head), 2),
                 dim_head = attn_dim_head,
                 mp_add_t = attn_res_mp_add_t,
                 flash = attn_flash
@@ -322,7 +322,7 @@ class Decoder(Module):
         if has_attn:
             self.attn = Attention(
                 dim = dim_out,
-                heads = ceil(dim_out / attn_dim_head),
+                heads = max(ceil(dim_out / attn_dim_head), 2),
                 dim_head = attn_dim_head,
                 mp_add_t = attn_res_mp_add_t,
                 flash = attn_flash
