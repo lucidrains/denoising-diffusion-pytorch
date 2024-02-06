@@ -1,3 +1,7 @@
+"""
+the magnitude-preserving unet proposed in https://arxiv.org/abs/2312.02696 by Karras et al.
+"""
+
 import math
 from math import sqrt, ceil
 from functools import partial
@@ -456,8 +460,9 @@ class KarrasUnet(Module):
         self.needs_class_labels = exists(num_classes)
         self.num_classes = num_classes
 
-        self.to_class_emb = Linear(num_classes, 4 * dim)
-        self.add_class_emb = MPAdd(t = mp_add_emb_t)
+        if self.needs_class_labels:
+            self.to_class_emb = Linear(num_classes, 4 * dim)
+            self.add_class_emb = MPAdd(t = mp_add_emb_t)
 
         # final embedding activations
 
@@ -536,6 +541,8 @@ class KarrasUnet(Module):
             Decoder(curr_dim, curr_dim, has_attn = mid_has_attn, **block_kwargs),
             Decoder(curr_dim, curr_dim, has_attn = mid_has_attn, **block_kwargs),
         ])
+
+        self.out_dim = channels
 
     @property
     def downsample_factor(self):
