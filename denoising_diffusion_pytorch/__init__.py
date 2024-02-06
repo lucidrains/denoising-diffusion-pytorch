@@ -7,3 +7,5 @@ from denoising_diffusion_pytorch.elucidated_diffusion import ElucidatedDiffusion
 from denoising_diffusion_pytorch.v_param_continuous_time_gaussian_diffusion import VParamContinuousTimeGaussianDiffusion
 
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch_1d import GaussianDiffusion1D, Unet1D, Trainer1D, Dataset1D
+
+from denoising_diffusion_pytorch.karras_unet import KarrasUnet

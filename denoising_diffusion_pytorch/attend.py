@@ -17,6 +17,9 @@ AttentionConfig = namedtuple('AttentionConfig', ['enable_flash', 'enable_math', 
 def exists(val):
     return val is not None
 
+def default(val, d):
+    return val if exists(val) else d
+
 def once(fn):
     called = False
     @wraps(fn)
@@ -36,10 +39,12 @@ class Attend(nn.Module):
     def __init__(
         self,
         dropout = 0.,
-        flash = False
+        flash = False,
+        scale = None
     ):
         super().__init__()
         self.dropout = dropout
+        self.scale = scale
         self.attn_dropout = nn.Dropout(dropout)
 
         self.flash = flash
@@ -64,6 +69,10 @@ class Attend(nn.Module):
 
     def flash_attn(self, q, k, v):
         _, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
+
+        if exists(self.scale):
+            default_scale = q.shape[-1]
+            q = q * (scale / default_scale)
 
         q, k, v = map(lambda t: t.contiguous(), (q, k, v))
 
@@ -95,7 +104,7 @@ class Attend(nn.Module):
         if self.flash:
             return self.flash_attn(q, k, v)
 
-        scale = q.shape[-1] ** -0.5
+        scale = default(self.scale, q.shape[-1] ** -0.5)
 
         # similarity
 
