@@ -1,5 +1,5 @@
 import math
-from math import sqrt
+from math import sqrt, ceil
 from random import random
 from functools import partial
 
@@ -24,6 +24,12 @@ def default(val, d):
         return val
     return d() if callable(d) else d
 
+def xnor(x, y):
+    return not (x ^ y)
+
+def prepend(arr, el):
+    arr.insert(0, el)
+
 def pack_one(t, pattern):
     return pack([t], pattern)
 
@@ -42,26 +48,6 @@ def divisible_by(numer, denom):
 
 def l2norm(t, dim = -1, eps = 1e-12):
     return F.normalize(t, dim = dim, eps = eps)
-
-# small helper modules
-
-def Upsample(dim):
-    return nn.Upsample(scale_factor = 2, mode = 'bilinear')
-
-class Downsample(Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.conv = WeightNormedConv2d(dim, dim, 1)
-        self.pixel_norm = PixelNorm(dim = 1)
-
-    def forward(self, x):
-        h, w = x.shape[-2:]
-        assert all([divisible_by(_, 2) for _ in (h, w)])
-
-        x = F.interpolate(x, (h // 2, w // 2), mode = 'bilinear')
-        x = self.conv(x)
-        x = self.pixel_norm(x)
-        return x
 
 # mp activations
 # section 2.5
@@ -105,7 +91,7 @@ class MPCat(Module):
 # empirically, they found t=0.3 for encoder / decoder / attention residuals
 # and for embedding, t=0.5
 
-class MPSum(Module):
+class MPAdd(Module):
     def __init__(self, t):
         super().__init__()
         self.t = t
@@ -133,7 +119,7 @@ class PixelNorm(Module):
 # forced weight normed conv2d and linear
 # algorithm 1 in paper
 
-class WeightNormedConv2d(Module):
+class Conv2d(Module):
     def __init__(
         self,
         dim_in,
@@ -165,7 +151,7 @@ class WeightNormedConv2d(Module):
 
         return F.conv2d(x, weight, padding='same')
 
-class WeightNormedLinear(Module):
+class Linear(Module):
     def __init__(self, dim_in, dim_out, eps = 1e-4):
         super().__init__()
         weight = torch.randn(dim_out, dim_in)
@@ -194,71 +180,169 @@ class MPFourierEmbedding(Module):
     def forward(self, x):
         x = rearrange(x, 'b -> b 1')
         freqs = x * rearrange(self.weights, 'd -> 1 d') * 2 * math.pi
-        return torch.cat((freqs.sin(), freqs.cos()), dim = -1) * (2 ** 0.5)
+        return torch.cat((freqs.sin(), freqs.cos()), dim = -1) * sqrt(2)
 
 # building block modules
 
-class Block(Module):
+class Encoder(Module):
     def __init__(
         self,
         dim,
-        dim_out,
-        mp_sum_t = 0.3
-    ):
-        super().__init__()
-        self.proj = WeightNormedConv2d(dim, dim_out, 3)
-        self.act = MPSiLU()
-        self.mp_add = MPSum(t = mp_sum_t)
-
-    def forward(self, x, scale = None):
-        res = x
-
-        x = self.proj(x)
-
-        if exists(scale):
-            x = x * (scale + 1)
-
-        x = self.act(x)
-
-        return mp_add(x, res)
-
-class ResnetBlock(Module):
-    def __init__(
-        self,
-        dim,
-        dim_out,
+        dim_out = None,
         *,
-        time_emb_dim = None
+        emb_dim = None,
+        dropout = 0.1,
+        mp_add_t = 0.3,
+        has_attn = False,
+        attn_dim_head = 64,
+        downsample = False
     ):
         super().__init__()
-        self.mlp = nn.Sequential(
+        dim_out = default(dim_out, dim)
+
+        self.downsample = downsample
+        self.downsample_conv = None
+
+        if downsample:
+            self.downsample_conv = Conv2d(dim, dim_out, 1)
+
+        self.pixel_norm = PixelNorm(dim = 1)
+
+        self.to_emb = None
+        if exists(emb_dim):
+            self.to_emb = nn.Sequential(
+                Linear(emb_dim, dim_out),
+                Gain()
+            )
+
+        self.block1 = nn.Sequential(
             MPSiLU(),
-            nn.Linear(time_emb_dim, dim_out, bias = False)
-        ) if exists(time_emb_dim) else None
+            Conv2d(dim, dim_out, 3)
+        )
 
-        self.block1 = Block(dim, dim_out)
-        self.block2 = Block(dim_out, dim_out)
-        self.res_conv = WeightNormedConv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+        self.block2 = nn.Sequential(
+            MPSiLU(),
+            nn.Dropout(dropout),
+            Conv2d(dim_out, dim_out, 3)
+        )
 
-    def forward(self, x, time_emb = None):
+        self.res_mp_add = MPAdd(t = mp_add_t)
 
-        scale = None
-        if exists(self.mlp) and exists(time_emb):
-            scale = self.mlp(time_emb)
-            scale = rearrange(scale, 'b c -> b c 1 1')
+        self.attn = None
+        if has_attn:
+            self.attn = Attention(
+                dim = dim,
+                heads = ceil(dim / attn_dim_head),
+                dim_head = attn_dim_head
+            )
 
-        h = self.block1(x, scale = scale)
+    def forward(
+        self,
+        x,
+        emb = None
+    ):
+        if self.downsample:
+            h, w = x.shape[-2:]
+            x = F.interpolate(x, (h // 2, w // 2), mode = 'bilinear')
+            x = self.downsample_conv(x)
 
-        h = self.block2(h)
+        x = self.pixel_norm(x)
 
-        return h + self.res_conv(x)
+        res = x.clone()
 
-class CosineSimAttention(Module):
+        x = self.block1(x)
+
+        if exists(emb):
+            scale = self.to_emb(emb) + 1
+            x = x * scale
+
+        x = self.block2(x)
+
+        x = self.res_mp_add(x, res)
+
+        if exists(self.attn):
+            x = self.attn(x)
+
+        return x
+
+class Decoder(Module):
+    def __init__(
+        self,
+        dim,
+        dim_out = None,
+        *,
+        emb_dim = None,
+        dropout = 0.1,
+        mp_add_t = 0.3,
+        has_attn = False,
+        attn_dim_head = 64,
+        upsample = False
+    ):
+        super().__init__()
+        dim_out = default(dim_out, dim)
+
+        self.upsample = upsample
+
+        self.to_emb = None
+        if exists(emb_dim):
+            self.to_emb = nn.Sequential(
+                Linear(emb_dim, dim_out),
+                Gain()
+            )
+
+        self.block1 = nn.Sequential(
+            MPSiLU(),
+            Conv2d(dim, dim_out, 3)
+        )
+
+        self.block2 = nn.Sequential(
+            MPSiLU(),
+            nn.Dropout(dropout),
+            Conv2d(dim_out, dim_out, 3)
+        )
+
+        self.res_conv = Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+
+        self.res_mp_add = MPAdd(t = mp_add_t)
+
+        self.attn = None
+        if has_attn:
+            self.attn = Attention(
+                dim = dim,
+                heads = ceil(dim / attn_dim_head),
+                dim_head = attn_dim_head
+            )
+
+    def forward(
+        self,
+        x,
+        emb = None
+    ):
+        res = self.res_conv(x)
+
+        x = self.block1(x)
+
+        if exists(emb):
+            scale = self.to_emb(emb) + 1
+            x = x * rearrange(scale, 'b c -> b c 1 1')
+
+        x = self.block2(x)
+
+        x = self.res_mp_add(x, res)
+
+        if exists(self.attn):
+            x = self.attn(x)
+
+        return x
+
+# attention
+
+class Attention(Module):
     def __init__(
         self,
         dim,
         heads = 4,
-        dim_head = 32,
+        dim_head = 64,
         num_mem_kv = 4,
         flash = False,
         mp_sum_t = 0.3
@@ -270,13 +354,13 @@ class CosineSimAttention(Module):
         self.pixel_norm = PixelNorm(dim = 1)
 
         # equation (34) - they used cosine sim of queries and keys with a fixed scale of sqrt(Nc)
-        self.attend = Attend(flash = flash, scale = dim_head ** 0.5)
+        self.attend = Attend(flash = flash, scale = sqrt(dim_head))
 
         self.mem_kv = nn.Parameter(torch.randn(2, heads, num_mem_kv, dim_head))
-        self.to_qkv = WeightNormedConv2d(dim, hidden_dim * 3, 1)
-        self.to_out = WeightNormedConv2d(hidden_dim, dim, 1)
+        self.to_qkv = Conv2d(dim, hidden_dim * 3, 1)
+        self.to_out = Conv2d(hidden_dim, dim, 1)
 
-        self.mp_add = MPSum(t = mp_sum_t)
+        self.mp_add = MPAdd(t = mp_sum_t)
 
     def forward(self, x):
         res, b, c, h, w = x, *x.shape
@@ -298,147 +382,212 @@ class CosineSimAttention(Module):
 
         return self.mp_add(out, res)
 
-# model
+# unet proposed by karras
+# bias-less, no group-norms, with magnitude preserving operations
 
 class KarrasUnet(Module):
+    """
+    going by figure 21. config G
+    """
+
     def __init__(
         self,
-        dim,
-        init_dim = None,
-        out_dim = None,
-        dim_mults = (1, 2, 4, 8),
-        channels = 3,
-        self_condition = False,
-        sinusoidal_dim = 16,
-        fourier_theta = 10000,
-        attn_dim_head = 32,
-        attn_heads = 4,
-        full_attn = None,    # defaults to full attention only for inner most layer
-        flash_attn = False,
-        mp_cat_t = 0.5
+        *,
+        image_size,
+        dim = 192,
+        dim_max = 768,            # channels will double every downsample and cap out to this value
+        num_classes = None,       # in paper, they do 1000 classes for a popular benchmark
+        channels = 4,             # 4 channels in paper for some reason, must be alpha channel?
+        num_downsamples = 3,
+        num_blocks_per_stage = 4,
+        attn_res = (16, 8),
+        fourier_dim = 16,
+        attn_dim_head = 64,
+        attn_flash = False,
+        mp_cat_t = 0.5,
+        mp_add_emb_t = 0.5,
+        attn_mp_sum_t = 0.3,
+        resnet_mp_sum_t = 0.3,
+        dropout = 0.1,
+        self_condition = False
     ):
         super().__init__()
+
+        self.self_condition = self_condition
 
         # determine dimensions
 
         self.channels = channels
-        self.self_condition = self_condition
+        self.image_size = image_size
         input_channels = channels * (2 if self_condition else 1)
 
-        init_dim = default(init_dim, dim)
-        self.init_conv = WeightNormedConv2d(input_channels, init_dim, 7, concat_ones_to_input = True)
+        # input and output blocks
 
-        dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
-        in_out = list(zip(dims[:-1], dims[1:]))
+        self.input_block = Conv2d(input_channels, dim, 3, concat_ones_to_input = True)
 
-        # time embeddings
-
-        time_dim = dim * 4
-
-        sinu_pos_emb = MPFourierEmbedding(sinusoidal_dim)
-        fourier_dim = sinusoidal_dim
-
-        self.time_mlp = nn.Sequential(
-            sinu_pos_emb,
-            nn.Linear(fourier_dim, time_dim, bias = False),
-            nn.GELU(),
-            nn.Linear(time_dim, time_dim, bias = False)
+        self.output_block = nn.Sequential(
+            Conv2d(dim, channels, 3),
+            Gain()
         )
+
+        # time embedding
+
+        emb_dim = dim * 4
+
+        self.to_time_emb = nn.Sequential(
+            MPFourierEmbedding(fourier_dim),
+            Linear(fourier_dim, emb_dim)
+        )
+
+        # class embedding
+
+        self.needs_class_labels = exists(num_classes)
+        self.num_classes = num_classes
+
+        self.to_class_emb = Linear(num_classes, 4 * dim)
+        self.add_class_emb = MPAdd(t = mp_add_emb_t)
+
+        # final embedding activations
+
+        self.emb_activation = MPSiLU()
+
+        # number of downsamples
+
+        self.num_downsamples = num_downsamples
 
         # attention
 
-        if not full_attn:
-            full_attn = (*((False,) * (len(dim_mults) - 1)), True)
+        attn_kwargs = dict(
+            flash = attn_flash,
+            dim_head = attn_dim_head,
+            mp_sum_t = attn_mp_sum_t
+        )
 
-        num_stages = len(dim_mults)
-        full_attn  = cast_tuple(full_attn, num_stages)
-        attn_heads = cast_tuple(attn_heads, num_stages)
-        attn_dim_head = cast_tuple(attn_dim_head, num_stages)
+        attn_res = cast_tuple(attn_res)
 
-        assert len(full_attn) == len(dim_mults)
+        # resnet block
 
-        # layers
+        block_kwargs = dict(
+            dropout = dropout,
+            emb_dim = emb_dim
+        )
 
+        # unet encoder and decoders
+
+        stages = num_downsamples + 1
         self.downs = ModuleList([])
         self.ups = ModuleList([])
-        num_resolutions = len(in_out)
 
-        self.mp_cat = MPCat(t = mp_cat_t, dim = 1)
+        curr_dim = dim
+        curr_res = image_size
 
-        for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(in_out, full_attn, attn_heads, attn_dim_head)):
-            is_last = ind >= (num_resolutions - 1)
+        stage_dims = [dim]
+
+        skip_dims = [dim]
+        self.skip_mp_cat = MPCat(t = mp_cat_t, dim = 1)
+
+        # take care of skip connection for initial input block
+
+        prepend(self.ups, Decoder(dim + skip_dims.pop(), dim, **block_kwargs))
+
+        # stages
+
+        return
+
+        for stage in range(stages):
+            is_last = stage == (stages - 1)
+            downsample = not is_last
+            has_attn = curr_res in attn_res
+
+            if downsample:
+                dim_out = min(curr_dim * 2, dim_max)
 
             self.downs.append(ModuleList([
                 ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
                 ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
-                CosineSimAttention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
-                Downsample(dim_in, dim_out) if not is_last else WeightNormedConv2d(dim_in, dim_out, 3)
+                Attention(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
+                Downsample(dim_in, dim_out) if not is_last else Conv2d(dim_in, dim_out, 3)
             ]))
 
-        mid_dim = dims[-1]
-        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
-        self.mid_attn = CosineSimAttention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
-        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
+            if downsample:
+                curr_res //= 2
+                curr_dim = dim_out
+                stage_dims.append(dim_out)
 
-        for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
-            is_last = ind == (len(in_out) - 1)
+        for stage in range(stages):
+            is_first = stage == 0
 
             self.ups.append(ModuleList([
                 ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
                 ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                CosineSimAttention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
-                Upsample(dim_out, dim_in) if not is_last else  WeightNormedConv2d(dim_out, dim_in, 3)
+                Attention(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads, flash = flash_attn),
+                Upsample(dim_out, dim_in) if not is_last else  Conv2d(dim_out, dim_in, 3)
             ]))
-
-        default_out_dim = channels * (1 if not learned_variance else 2)
-        self.out_dim = default(out_dim, default_out_dim)
-
-        self.final_res_block = ResnetBlock(dim * 2, dim, time_emb_dim = time_dim)
-        self.final_conv = WeightNormedConv2d(dim, self.out_dim, 1)
 
     @property
     def downsample_factor(self):
-        return 2 ** (len(self.downs) - 1)
+        return 2 ** self.num_downsamples
 
-    def forward(self, x, time, x_self_cond = None):
-        assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
+    def forward(
+        self,
+        x,
+        time,
+        self_cond = None,
+        class_labels = None
+    ):
+        # validate image shape
+
+        assert x.shape[1:] == (self.channels, self.image_size, self.image_size)
+
+        # self conditioning
 
         if self.self_condition:
-            x_self_cond = default(x_self_cond, lambda: torch.zeros_like(x))
-            x = torch.cat((x_self_cond, x), dim = 1)
+            self_cond = default(self_cond, lambda: torch.zeros_like(x))
+            x = torch.cat((self_cond, x), dim = 1)
+        else:
+            assert not exists(self_cond)
 
-        x = self.init_conv(x)
-        r = x.clone()
+        # time condition
 
-        t = self.time_mlp(time)
+        time_emb = self.to_time_emb(time)
 
-        h = []
+        # class condition
 
-        for block1, block2, attn, downsample in self.downs:
-            x = block1(x, t)
-            h.append(x)
+        assert xnor(exists(class_labels), self.needs_class_labels)
 
-            x = block2(x, t)
-            x = attn(x) + x
-            h.append(x)
+        if self.needs_class_labels:
+            if class_labels.dtype in (torch.int, torch.long):
+                class_labels = F.one_hot(class_labels, self.num_classes)
 
-            x = downsample(x)
+            assert class_labels.shape[-1] == self.num_classes
+            class_labels = class_labels.float() * sqrt(self.num_classes)
 
-        x = self.mid_block1(x, t)
-        x = self.mid_attn(x) + x
-        x = self.mid_block2(x, t)
+            class_emb = self.to_class_emb(class_labels)
 
-        for block1, block2, attn, upsample in self.ups:
-            x = self.mp_cat(x, h.pop())
-            x = block1(x, t)
+            time_emb = self.add_class_emb(time_emb, class_emb)
 
-            x = self.mp_cat(x, h.pop())
-            x = block2(x, t)
-            x = attn(x) + x
+        # final mp-silu for embedding
 
-            x = upsample(x)
+        emb = self.emb_activation(time_emb)
 
-        x = torch.cat((x, r), dim = 1)
+        # skip connections
 
-        x = self.final_res_block(x, t)
-        return self.final_conv(x)
+        skips = []
+
+        # input block
+
+        x = self.input_block(x)
+
+        skips.append(x)
+
+        # down
+
+        # up
+
+        for decoder in self.ups:
+            x = self.skip_mp_cat(x, skips.pop())
+            x = decoder(x, emb = emb)
+
+        # output block
+
+        return self.output_block(x)
