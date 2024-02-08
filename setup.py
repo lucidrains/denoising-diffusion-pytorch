@@ -19,7 +19,7 @@ setup(
   install_requires=[
     'accelerate',
     'einops',
-    'ema-pytorch',
+    'ema-pytorch>=0.4.2',
     'numpy',
     'pillow',
     'pytorch-fid',
