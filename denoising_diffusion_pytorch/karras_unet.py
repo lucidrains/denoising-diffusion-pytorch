@@ -371,7 +371,7 @@ class Attention(Module):
         self.heads = heads
         hidden_dim = dim_head * heads
 
-        self.pixel_norm = PixelNorm(dim = 1)
+        self.pixel_norm = PixelNorm(dim = -1)
 
         self.attend = Attend(flash = flash)
 
