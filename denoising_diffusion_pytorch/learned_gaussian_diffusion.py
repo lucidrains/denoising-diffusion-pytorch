@@ -81,7 +81,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         self.vb_loss_weight = vb_loss_weight
 
-    def model_predictions(self, x, t, clip_x_start = False):
+    def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False, rederive_pred_noise = False):
         model_output = self.model(x, t)
         model_output, pred_variance = model_output.chunk(2, dim = 1)
 
