@@ -14,3 +14,4 @@ from denoising_diffusion_pytorch.karras_unet import (
 )
 
 from denoising_diffusion_pytorch.karras_unet_1d import KarrasUnet1D
+from denoising_diffusion_pytorch.karras_unet_3d import KarrasUnet3D
