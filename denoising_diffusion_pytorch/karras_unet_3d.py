@@ -208,6 +208,7 @@ class Encoder(Module):
         attn_dim_head = 64,
         attn_res_mp_add_t = 0.3,
         attn_flash = False,
+        factorize_space_time_attn = False,
         downsample = False,
         downsample_config: Tuple[bool, bool, bool] = (True, True, True)
     ):
@@ -247,14 +248,24 @@ class Encoder(Module):
         self.res_mp_add = MPAdd(t = mp_add_t)
 
         self.attn = None
+        self.factorized_attn = factorize_space_time_attn
+
         if has_attn:
-            self.attn = Attention(
+            attn_kwargs = dict(
                 dim = dim_out,
                 heads = max(ceil(dim_out / attn_dim_head), 2),
                 dim_head = attn_dim_head,
                 mp_add_t = attn_res_mp_add_t,
                 flash = attn_flash
             )
+
+            if factorize_space_time_attn:
+                self.attn = nn.ModuleList([
+                    Attention(**attn_kwargs, only_space = True),
+                    Attention(**attn_kwargs, only_time = True),
+                ])
+            else:
+                self.attn = Attention(**attn_kwargs)
 
     def forward(
         self,
@@ -284,7 +295,13 @@ class Encoder(Module):
         x = self.res_mp_add(x, res)
 
         if exists(self.attn):
-            x = self.attn(x)
+            if self.factorized_attn:
+                attn_space, attn_time = self.attn
+                x = attn_space(x)
+                x = attn_time(x)
+
+            else:
+                x = self.attn(x)
 
         return x
 
@@ -301,6 +318,7 @@ class Decoder(Module):
         attn_dim_head = 64,
         attn_res_mp_add_t = 0.3,
         attn_flash = False,
+        factorize_space_time_attn = False,
         upsample = False,
         upsample_config: Tuple[bool, bool, bool] = (True, True, True)
     ):
@@ -335,14 +353,24 @@ class Decoder(Module):
         self.res_mp_add = MPAdd(t = mp_add_t)
 
         self.attn = None
+        self.factorized_attn = factorize_space_time_attn
+
         if has_attn:
-            self.attn = Attention(
+            attn_kwargs = dict(
                 dim = dim_out,
                 heads = max(ceil(dim_out / attn_dim_head), 2),
                 dim_head = attn_dim_head,
                 mp_add_t = attn_res_mp_add_t,
                 flash = attn_flash
             )
+
+            if factorize_space_time_attn:
+                self.attn = nn.ModuleList([
+                    Attention(**attn_kwargs, only_space = True),
+                    Attention(**attn_kwargs, only_time = True),
+                ])
+            else:
+                self.attn = Attention(**attn_kwargs)
 
     def forward(
         self,
@@ -369,7 +397,13 @@ class Decoder(Module):
         x = self.res_mp_add(x, res)
 
         if exists(self.attn):
-            x = self.attn(x)
+            if self.factorized_attn:
+                attn_space, attn_time = self.attn
+                x = attn_space(x)
+                x = attn_time(x)
+
+            else:
+                x = self.attn(x)
 
         return x
 
@@ -383,9 +417,13 @@ class Attention(Module):
         dim_head = 64,
         num_mem_kv = 4,
         flash = False,
-        mp_add_t = 0.3
+        mp_add_t = 0.3,
+        only_space = False,
+        only_time = False
     ):
         super().__init__()
+        assert (int(only_space) + int(only_time)) <= 1
+
         self.heads = heads
         hidden_dim = dim_head * heads
 
@@ -399,20 +437,41 @@ class Attention(Module):
 
         self.mp_add = MPAdd(t = mp_add_t)
 
+        self.only_space = only_space
+        self.only_time = only_time
+
     def forward(self, x):
-        res, b, c, t, h, w = x, *x.shape
+        res, orig_shape = x, x.shape
+        b, c, t, h, w = orig_shape
 
-        qkv = self.to_qkv(x).chunk(3, dim = 1)
-        q, k, v = map(lambda t: rearrange(t, 'b (h c) t x y -> b h (t x y) c', h = self.heads), qkv)
+        qkv = self.to_qkv(x)
 
-        mk, mv = map(lambda t: repeat(t, 'h n d -> b h n d', b = b), self.mem_kv)
+        if self.only_space:
+            qkv = rearrange(qkv, 'b c t x y -> (b t) c x y')
+        elif self.only_time:
+            qkv = rearrange(qkv, 'b c t x y -> (b x y) c t')
+
+        qkv = qkv.chunk(3, dim = 1)
+
+        q, k, v = map(lambda t: rearrange(t, 'b (h c) ... -> b h (...) c', h = self.heads), qkv)
+
+        mk, mv = map(lambda t: repeat(t, 'h n d -> b h n d', b = k.shape[0]), self.mem_kv)
+
         k, v = map(partial(torch.cat, dim = -2), ((mk, k), (mv, v)))
 
         q, k, v = map(self.pixel_norm, (q, k, v))
 
         out = self.attend(q, k, v)
 
-        out = rearrange(out, 'b h (t x y) d -> b (h d) t x y', t = t, x = h, y = w)
+        out = rearrange(out, 'b h n d -> b (h d) n')
+
+        if self.only_space:
+            out = rearrange(out, '(b t) c n -> b c (t n)', t = t)
+        elif self.only_time:
+            out = rearrange(out, '(b x y) c n -> b c (n x y)', x = h, y = w)
+
+        out = out.reshape(orig_shape)
+
         out = self.to_out(out)
 
         return self.mp_add(out, res)
@@ -446,7 +505,8 @@ class KarrasUnet3D(Module):
         attn_res_mp_add_t = 0.3,
         resnet_mp_add_t = 0.3,
         dropout = 0.1,
-        self_condition = False
+        self_condition = False,
+        factorize_space_time_attn = False
     ):
         super().__init__()
 
@@ -576,6 +636,7 @@ class KarrasUnet3D(Module):
                 has_attn = curr_image_res in attn_res,
                 upsample = True,
                 upsample_config = down_and_upsample_config,
+                factorize_space_time_attn = factorize_space_time_attn,
                 **block_kwargs
             )
 
@@ -593,6 +654,7 @@ class KarrasUnet3D(Module):
                 downsample = True,
                 downsample_config = down_and_upsample_config,
                 has_attn = has_attn,
+                factorize_space_time_attn = factorize_space_time_attn,
                 **block_kwargs
             )
 
@@ -777,6 +839,7 @@ if __name__ == '__main__':
         ),
         attn_dim_head = 8,
         num_classes = 1000,
+        factorize_space_time_attn = True  # whether to do attention across space and time separately
     )
 
     video = torch.randn(2, 4, 32, 64, 64)
