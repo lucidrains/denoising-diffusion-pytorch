@@ -779,10 +779,10 @@ if __name__ == '__main__':
         num_classes = 1000,
     )
 
-    images = torch.randn(2, 4, 32, 64, 64)
+    video = torch.randn(2, 4, 32, 64, 64)
 
-    denoised_images = unet(
-        images,
+    denoised_video = unet(
+        video,
         time = torch.ones(2,),
         class_labels = torch.randint(0, 1000, (2,))
     )
