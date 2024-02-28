@@ -145,7 +145,7 @@ class Conv3d(Module):
         self.weight = nn.Parameter(weight)
 
         self.eps = eps
-        self.fan_in = dim_in * kernel_size ** 2
+        self.fan_in = dim_in * kernel_size ** 3
         self.concat_ones_to_input = concat_ones_to_input
 
     def forward(self, x):
