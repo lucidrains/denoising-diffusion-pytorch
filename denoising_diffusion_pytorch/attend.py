@@ -61,8 +61,19 @@ class Attend(nn.Module):
         device_properties = torch.cuda.get_device_properties(torch.device('cuda'))
 
         if device_properties.major == 8 and device_properties.minor == 0:
-            print_once('A100 GPU detected, using flash attention if input tensor is on cuda')
-            self.cuda_config = AttentionConfig(True, False, False)
+            # These lines are commented out to workaround the issue
+            # "RuntimeError: No available kernel. Aborting execution."
+            # when using flash attention on A100 GPUs:
+            # References:
+            # - https://github.com/lucidrains/x-transformers/issues/143
+            # - https://github.com/lucidrains/magvit2-pytorch/issues/9
+            # print_once('A100 GPU detected, using flash attention if input tensor is on cuda')
+            # self.cuda_config = AttentionConfig(True, False, False)
+
+            # Using Non-A100 GPU config for now ...
+            print_once('A100 GPU detected, using math or mem efficient attention if input tensor is on cuda')
+            self.cuda_config = AttentionConfig(False, True, True)
+            print_once(f'AttentionConig: {self.cuda_config}')
         else:
             print_once('Non-A100 GPU detected, using math or mem efficient attention if input tensor is on cuda')
             self.cuda_config = AttentionConfig(False, True, True)
