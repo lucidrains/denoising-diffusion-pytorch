@@ -127,12 +127,13 @@ diffusion = GaussianDiffusion1D(
 )
 
 training_seq = torch.rand(64, 32, 128) # features are normalized from 0 to 1
-dataset = Dataset1D(training_seq)  # this is just an example, but you can formulate your own Dataset and pass it into the `Trainer1D` below
 
 loss = diffusion(training_seq)
 loss.backward()
 
 # Or using trainer
+
+dataset = Dataset1D(training_seq)  # this is just an example, but you can formulate your own Dataset and pass it into the `Trainer1D` below
 
 trainer = Trainer1D(
     diffusion,
