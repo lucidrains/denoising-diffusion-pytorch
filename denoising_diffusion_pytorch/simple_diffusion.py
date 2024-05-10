@@ -116,10 +116,10 @@ class LearnedSinusoidalPosEmb(nn.Module):
 # building block modules
 
 class Block(nn.Module):
-    def __init__(self, dim, dim_out, groups = 8):
+    def __init__(self, dim, dim_out):
         super().__init__()
         self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
-        self.norm = nn.GroupNorm(groups, dim_out)
+        self.norm = RMSNorm(dim_out, normalize_dim = 1)
         self.act = nn.SiLU()
 
     def forward(self, x, scale_shift = None):
@@ -134,15 +134,15 @@ class Block(nn.Module):
         return x
 
 class ResnetBlock(nn.Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim = None, groups = 8):
+    def __init__(self, dim, dim_out, *, time_emb_dim = None):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.SiLU(),
             nn.Linear(time_emb_dim, dim_out * 2)
         ) if exists(time_emb_dim) else None
 
-        self.block1 = Block(dim, dim_out, groups = groups)
-        self.block2 = Block(dim_out, dim_out, groups = groups)
+        self.block1 = Block(dim, dim_out)
+        self.block2 = Block(dim_out, dim_out)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb = None):
@@ -319,7 +319,6 @@ class UViT(nn.Module):
         attn_dim_head = 32,
         attn_heads = 4,
         ff_mult = 4,
-        resnet_block_groups = 8,
         learned_sinusoidal_dim = 16,
         init_img_transform: callable = None,
         final_img_itransform: callable = None,
@@ -369,8 +368,6 @@ class UViT(nn.Module):
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
 
-        resnet_block = partial(ResnetBlock, groups = resnet_block_groups)
-
         # time embeddings
 
         time_dim = dim * 4
@@ -400,8 +397,8 @@ class UViT(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                resnet_block(dim_in, dim_in, time_emb_dim = time_dim),
-                resnet_block(dim_in, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
                 LinearAttention(dim_in),
                 Downsample(dim_in, dim_out, factor = factor)
             ]))
@@ -423,15 +420,15 @@ class UViT(nn.Module):
 
             self.ups.append(nn.ModuleList([
                 Upsample(dim_out, dim_in, factor = factor),
-                resnet_block(dim_in * 2, dim_in, time_emb_dim = time_dim),
-                resnet_block(dim_in * 2, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in * 2, dim_in, time_emb_dim = time_dim),
+                ResnetBlock(dim_in * 2, dim_in, time_emb_dim = time_dim),
                 LinearAttention(dim_in),
             ]))
 
         default_out_dim = input_channels
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = resnet_block(dim * 2, dim, time_emb_dim = time_dim)
+        self.final_res_block = ResnetBlock(dim * 2, dim, time_emb_dim = time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     def forward(self, x, time):
