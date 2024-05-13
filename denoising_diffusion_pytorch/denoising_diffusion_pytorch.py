@@ -1,5 +1,6 @@
 import math
 import copy
+import os
 from pathlib import Path
 from random import random
 from functools import partial
@@ -1020,6 +1021,13 @@ class Trainer(object):
     def train(self):
         accelerator = self.accelerator
         device = accelerator.device
+
+        print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+        print(f"Is CUDA available: {torch.cuda.is_available()}")
+        print(f"Torch available devices: {torch.cuda.device_count()}")
+        print(f"Accelerator device: {device}")
+        print(f"Accelerator running with {accelerator.num_processes} processes")
+        print(f"Accelerator distributed type {accelerator.distributed_type}")
 
         with tqdm(initial = self.step, total = self.train_num_steps, disable = not accelerator.is_main_process) as pbar:
 
