@@ -72,7 +72,7 @@ class Attend(nn.Module):
 
         if exists(self.scale):
             default_scale = q.shape[-1]
-            q = q * (scale / default_scale)
+            q = q * (self.scale / default_scale)
 
         q, k, v = map(lambda t: t.contiguous(), (q, k, v))
 
