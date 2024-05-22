@@ -693,7 +693,7 @@ class GaussianDiffusion(Module):
 
         for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', total = self.num_timesteps):
             self_cond = x_start if self.self_condition else None
-            img, x_start = self.p_sample(img, t, self_cond)
+            img, x_start = self.p_sample(img, t, self_cond, gt, mask)
             imgs.append(img)
 
         if resample is True and t == 0:
@@ -760,7 +760,7 @@ class GaussianDiffusion(Module):
     @torch.inference_mode()
     def sample(self, batch_size = 16, return_all_timesteps = False, gt=None, mask=None,resample = True,resample_iter = 10,resample_jump = 10):
         (h, w), channels = self.image_size, self.channels
-        # sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
+        batch_size = mask.shape[0] if mask is not None else batch_size
         sample_fn = self.p_sample_loop
         return sample_fn((batch_size, channels, h, w), return_all_timesteps = return_all_timesteps, gt=gt, mask=mask,resample=resample,resample_iter=resample_iter,resample_jump=resample_jump)
 
