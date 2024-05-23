@@ -677,9 +677,16 @@ class GaussianDiffusion(Module):
 
         b, *_, device = *x.shape, self.device
         batched_times = torch.full((b,), t, device = device, dtype = torch.long)
-        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = True)
+        model_mean, _, model_log_variance, x_start = self.p_mean_variance(
+            x=x, t=batched_times, x_self_cond=x_self_cond, clip_denoised=True
+        )
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
+
+        if t==0 and mask is not None:
+            # if t == 0, we use the ground-truth image if in-painting
+            pred_img = (mask * gt) +  ((1 - mask) * pred_img)
+
         return pred_img, x_start
 
     @torch.inference_mode()
@@ -707,7 +714,7 @@ class GaussianDiffusion(Module):
             imgs.append(img)
 
             # Resampling loop: line 9 of Algorithm 1 in https://arxiv.org/pdf/2201.09865
-            if resample is True and (t > 0) and (t % resample_every == 0):
+            if resample is True and (t > 0) and (t % resample_every == 0 or t == 1):
                 # Jump back for resample_jump timesteps and resample_iter times
                 for iter in tqdm(range(resample_iter), desc = 'resample loop', total = resample_iter):
                     t = resample_jump
