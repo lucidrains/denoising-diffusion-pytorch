@@ -151,7 +151,7 @@ class Block(nn.Module):
     def __init__(self, dim, dim_out):
         super().__init__()
         self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
-        self.norm = RMSNorm(groups, dim_out)
+        self.norm = RMSNorm(dim_out)
         self.act = nn.SiLU()
 
     def forward(self, x, scale_shift = None):
