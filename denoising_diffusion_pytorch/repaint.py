@@ -714,7 +714,7 @@ class GaussianDiffusion(Module):
             imgs.append(img)
 
             # Resampling loop: line 9 of Algorithm 1 in https://arxiv.org/pdf/2201.09865
-            if resample is True and (t > 0) and (t % resample_every == 0 or t == 1):
+            if resample is True and (t > 0) and (t % resample_every == 0 or t == 1) and mask is not None:
                 # Jump back for resample_jump timesteps and resample_iter times
                 for iter in tqdm(range(resample_iter), desc = 'resample loop', total = resample_iter):
                     t = resample_jump
