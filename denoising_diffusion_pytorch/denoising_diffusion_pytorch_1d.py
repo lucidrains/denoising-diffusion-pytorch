@@ -7,6 +7,7 @@ from multiprocessing import cpu_count
 
 import torch
 from torch import nn, einsum, Tensor
+from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
 from torch.optim import Adam
@@ -83,7 +84,7 @@ class Dataset1D(Dataset):
 
 # small helper modules
 
-class Residual(nn.Module):
+class Residual(Module):
     def __init__(self, fn):
         super().__init__()
         self.fn = fn
@@ -100,7 +101,7 @@ def Upsample(dim, dim_out = None):
 def Downsample(dim, dim_out = None):
     return nn.Conv1d(dim, default(dim_out, dim), 4, 2, 1)
 
-class RMSNorm(nn.Module):
+class RMSNorm(Module):
     def __init__(self, dim):
         super().__init__()
         self.g = nn.Parameter(torch.ones(1, dim, 1))
@@ -108,7 +109,7 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         return F.normalize(x, dim = 1) * self.g * (x.shape[1] ** 0.5)
 
-class PreNorm(nn.Module):
+class PreNorm(Module):
     def __init__(self, dim, fn):
         super().__init__()
         self.fn = fn
@@ -120,7 +121,7 @@ class PreNorm(nn.Module):
 
 # sinusoidal positional embeds
 
-class SinusoidalPosEmb(nn.Module):
+class SinusoidalPosEmb(Module):
     def __init__(self, dim, theta = 10000):
         super().__init__()
         self.dim = dim
@@ -135,7 +136,7 @@ class SinusoidalPosEmb(nn.Module):
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
 
-class RandomOrLearnedSinusoidalPosEmb(nn.Module):
+class RandomOrLearnedSinusoidalPosEmb(Module):
     """ following @crowsonkb 's lead with random (learned optional) sinusoidal pos emb """
     """ https://github.com/crowsonkb/v-diffusion-jax/blob/master/diffusion/models/danbooru_128.py#L8 """
 
@@ -154,12 +155,13 @@ class RandomOrLearnedSinusoidalPosEmb(nn.Module):
 
 # building block modules
 
-class Block(nn.Module):
-    def __init__(self, dim, dim_out):
+class Block(Module):
+    def __init__(self, dim, dim_out, dropout = 0.):
         super().__init__()
         self.proj = nn.Conv1d(dim, dim_out, 3, padding = 1)
         self.norm = RMSNorm(dim_out)
         self.act = nn.SiLU()
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, scale_shift = None):
         x = self.proj(x)
@@ -170,17 +172,17 @@ class Block(nn.Module):
             x = x * (scale + 1) + shift
 
         x = self.act(x)
-        return x
+        return self.dropout(x)
 
-class ResnetBlock(nn.Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim = None):
+class ResnetBlock(Module):
+    def __init__(self, dim, dim_out, *, time_emb_dim = None, dropout = 0.):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.SiLU(),
             nn.Linear(time_emb_dim, dim_out * 2)
         ) if exists(time_emb_dim) else None
 
-        self.block1 = Block(dim, dim_out)
+        self.block1 = Block(dim, dim_out, dropout = dropout)
         self.block2 = Block(dim_out, dim_out)
         self.res_conv = nn.Conv1d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
@@ -198,7 +200,7 @@ class ResnetBlock(nn.Module):
 
         return h + self.res_conv(x)
 
-class LinearAttention(nn.Module):
+class LinearAttention(Module):
     def __init__(self, dim, heads = 4, dim_head = 32):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -227,7 +229,7 @@ class LinearAttention(nn.Module):
         out = rearrange(out, 'b h c n -> b (h c) n', h = self.heads)
         return self.to_out(out)
 
-class Attention(nn.Module):
+class Attention(Module):
     def __init__(self, dim, heads = 4, dim_head = 32):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -253,7 +255,7 @@ class Attention(nn.Module):
 
 # model
 
-class Unet1D(nn.Module):
+class Unet1D(Module):
     def __init__(
         self,
         dim,
@@ -261,6 +263,7 @@ class Unet1D(nn.Module):
         out_dim = None,
         dim_mults=(1, 2, 4, 8),
         channels = 3,
+        dropout = 0.,
         self_condition = False,
         learned_variance = False,
         learned_sinusoidal_cond = False,
@@ -304,33 +307,35 @@ class Unet1D(nn.Module):
             nn.Linear(time_dim, time_dim)
         )
 
+        resnet_block = partial(ResnetBlock, time_emb_dim = time_dim, dropout = dropout)
+
         # layers
 
-        self.downs = nn.ModuleList([])
-        self.ups = nn.ModuleList([])
+        self.downs = ModuleList([])
+        self.ups = ModuleList([])
         num_resolutions = len(in_out)
 
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
 
-            self.downs.append(nn.ModuleList([
-                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
-                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
+            self.downs.append(ModuleList([
+                resnet_block(dim_in, dim_in),
+                resnet_block(dim_in, dim_in),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv1d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block1 = resnet_block(mid_dim, mid_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim, dim_head = attn_dim_head, heads = attn_heads)))
-        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block2 = resnet_block(mid_dim, mid_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out)):
             is_last = ind == (len(in_out) - 1)
 
-            self.ups.append(nn.ModuleList([
-                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+            self.ups.append(ModuleList([
+                resnet_block(dim_out + dim_in, dim_out),
+                resnet_block(dim_out + dim_in, dim_out),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv1d(dim_out, dim_in, 3, padding = 1)
             ]))
@@ -338,7 +343,7 @@ class Unet1D(nn.Module):
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = ResnetBlock(dim * 2, dim, time_emb_dim = time_dim)
+        self.final_res_block = resnet_block(dim * 2, dim)
         self.final_conv = nn.Conv1d(dim, self.out_dim, 1)
 
     def forward(self, x, time, x_self_cond = None):
@@ -407,7 +412,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
 
-class GaussianDiffusion1D(nn.Module):
+class GaussianDiffusion1D(Module):
     def __init__(
         self,
         model,

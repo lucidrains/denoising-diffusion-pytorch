@@ -27,7 +27,6 @@ from ema_pytorch import EMA
 from accelerate import Accelerator
 
 from denoising_diffusion_pytorch.attend import Attend
-from denoising_diffusion_pytorch.fid_evaluation import FIDEvaluation
 
 from denoising_diffusion_pytorch.version import __version__
 
@@ -145,11 +144,12 @@ class RandomOrLearnedSinusoidalPosEmb(Module):
 # building block modules
 
 class Block(Module):
-    def __init__(self, dim, dim_out):
+    def __init__(self, dim, dim_out, dropout = 0.):
         super().__init__()
         self.proj = nn.Conv2d(dim, dim_out, 3, padding = 1)
         self.norm = RMSNorm(dim_out)
         self.act = nn.SiLU()
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, scale_shift = None):
         x = self.proj(x)
@@ -160,17 +160,17 @@ class Block(Module):
             x = x * (scale + 1) + shift
 
         x = self.act(x)
-        return x
+        return self.dropout(x)
 
 class ResnetBlock(Module):
-    def __init__(self, dim, dim_out, *, time_emb_dim = None):
+    def __init__(self, dim, dim_out, *, time_emb_dim = None, dropout = 0.):
         super().__init__()
         self.mlp = nn.Sequential(
             nn.SiLU(),
             nn.Linear(time_emb_dim, dim_out * 2)
         ) if exists(time_emb_dim) else None
 
-        self.block1 = Block(dim, dim_out)
+        self.block1 = Block(dim, dim_out, dropout = dropout)
         self.block2 = Block(dim_out, dim_out)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
@@ -285,6 +285,7 @@ class Unet(Module):
         random_fourier_features = False,
         learned_sinusoidal_dim = 16,
         sinusoidal_pos_emb_theta = 10000,
+        dropout = 0.,
         attn_dim_head = 32,
         attn_heads = 4,
         full_attn = None,    # defaults to full attention only for inner most layer
@@ -336,7 +337,10 @@ class Unet(Module):
 
         assert len(full_attn) == len(dim_mults)
 
+        # prepare blocks
+
         FullAttention = partial(Attention, flash = flash_attn)
+        resnet_block = partial(ResnetBlock, time_emb_dim = time_dim, dropout = dropout)
 
         # layers
 
@@ -350,16 +354,16 @@ class Unet(Module):
             attn_klass = FullAttention if layer_full_attn else LinearAttention
 
             self.downs.append(ModuleList([
-                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
-                ResnetBlock(dim_in, dim_in, time_emb_dim = time_dim),
+                resnet_block(dim_in, dim_in),
+                resnet_block(dim_in, dim_in),
                 attn_klass(dim_in, dim_head = layer_attn_dim_head, heads = layer_attn_heads),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv2d(dim_in, dim_out, 3, padding = 1)
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block1 = resnet_block(mid_dim, mid_dim)
         self.mid_attn = FullAttention(mid_dim, heads = attn_heads[-1], dim_head = attn_dim_head[-1])
-        self.mid_block2 = ResnetBlock(mid_dim, mid_dim, time_emb_dim = time_dim)
+        self.mid_block2 = resnet_block(mid_dim, mid_dim)
 
         for ind, ((dim_in, dim_out), layer_full_attn, layer_attn_heads, layer_attn_dim_head) in enumerate(zip(*map(reversed, (in_out, full_attn, attn_heads, attn_dim_head)))):
             is_last = ind == (len(in_out) - 1)
@@ -367,8 +371,8 @@ class Unet(Module):
             attn_klass = FullAttention if layer_full_attn else LinearAttention
 
             self.ups.append(ModuleList([
-                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
-                ResnetBlock(dim_out + dim_in, dim_out, time_emb_dim = time_dim),
+                resnet_block(dim_out + dim_in, dim_out),
+                resnet_block(dim_out + dim_in, dim_out),
                 attn_klass(dim_out, dim_head = layer_attn_dim_head, heads = layer_attn_heads),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv2d(dim_out, dim_in, 3, padding = 1)
             ]))
@@ -376,7 +380,7 @@ class Unet(Module):
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = ResnetBlock(dim * 2, dim, time_emb_dim = time_dim)
+        self.final_res_block = resnet_block(dim * 2, dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     @property
@@ -954,11 +958,14 @@ class Trainer:
         self.calculate_fid = calculate_fid and self.accelerator.is_main_process
 
         if self.calculate_fid:
+            from denoising_diffusion_pytorch.fid_evaluation import FIDEvaluation
+
             if not is_ddim_sampling:
                 self.accelerator.print(
                     "WARNING: Robust FID computation requires a lot of generated samples and can therefore be very time consuming."\
                     "Consider using DDIM sampling to save time."
                 )
+
             self.fid_scorer = FIDEvaluation(
                 batch_size=self.batch_size,
                 dl=self.dl,
