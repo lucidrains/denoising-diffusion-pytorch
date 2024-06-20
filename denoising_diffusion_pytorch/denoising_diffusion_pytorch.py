@@ -1030,6 +1030,7 @@ class Trainer:
         with tqdm(initial = self.step, total = self.train_num_steps, disable = not accelerator.is_main_process) as pbar:
 
             while self.step < self.train_num_steps:
+                self.model.train()
 
                 total_loss = 0.
 
@@ -1074,6 +1075,7 @@ class Trainer:
                         if self.calculate_fid:
                             fid_score = self.fid_scorer.fid_score()
                             accelerator.print(f'fid_score: {fid_score}')
+
                         if self.save_best_and_latest_only:
                             if self.best_fid > fid_score:
                                 self.best_fid = fid_score

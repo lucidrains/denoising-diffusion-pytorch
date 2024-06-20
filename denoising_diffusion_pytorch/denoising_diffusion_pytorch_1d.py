@@ -838,6 +838,7 @@ class Trainer1D(object):
         with tqdm(initial = self.step, total = self.train_num_steps, disable = not accelerator.is_main_process) as pbar:
 
             while self.step < self.train_num_steps:
+                self.model.train()
 
                 total_loss = 0.
 
