@@ -428,8 +428,8 @@ class UViT(nn.Module):
         default_out_dim = input_channels
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = ResnetBlock(dim * 2, dim, time_emb_dim = time_dim)
-        self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
+        self.final_res_block = ResnetBlock(init_dim * 2, init_dim, time_emb_dim = time_dim)
+        self.final_conv = nn.Conv2d(init_dim, self.out_dim, 1)
 
     def forward(self, x, time):
         x = self.init_img_transform(x)

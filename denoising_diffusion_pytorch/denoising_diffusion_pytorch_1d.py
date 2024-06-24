@@ -343,8 +343,8 @@ class Unet1D(Module):
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = resnet_block(dim * 2, dim)
-        self.final_conv = nn.Conv1d(dim, self.out_dim, 1)
+        self.final_res_block = resnet_block(init_dim * 2, init_dim)
+        self.final_conv = nn.Conv1d(init_dim, self.out_dim, 1)
 
     def forward(self, x, time, x_self_cond = None):
         if self.self_condition:
