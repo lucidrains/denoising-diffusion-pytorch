@@ -380,7 +380,7 @@ class Unet(Module):
         default_out_dim = channels * (1 if not learned_variance else 2)
         self.out_dim = default(out_dim, default_out_dim)
 
-        self.final_res_block = resnet_block(dim * 2, dim)
+        self.final_res_block = resnet_block(init_dim * 2, dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
     @property
