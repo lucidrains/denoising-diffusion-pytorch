@@ -20,6 +20,8 @@ from torchvision import transforms as T, utils
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange
 
+from scipy.optimize import linear_sum_assignment
+
 from PIL import Image
 from tqdm.auto import tqdm
 from ema_pytorch import EMA
@@ -488,7 +490,8 @@ class GaussianDiffusion(Module):
         auto_normalize = True,
         offset_noise_strength = 0.,  # https://www.crosslabs.org/blog/diffusion-with-offset-noise
         min_snr_loss_weight = False, # https://arxiv.org/abs/2303.09556
-        min_snr_gamma = 5
+        min_snr_gamma = 5,
+        immiscible = False
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
@@ -563,6 +566,10 @@ class GaussianDiffusion(Module):
         register_buffer('posterior_log_variance_clipped', torch.log(posterior_variance.clamp(min =1e-20)))
         register_buffer('posterior_mean_coef1', betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod))
         register_buffer('posterior_mean_coef2', (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod))
+
+        # immiscible diffusion
+
+        self.immiscible = immiscible
 
         # offset noise strength - in blogpost, they claimed 0.1 was ideal
 
@@ -759,9 +766,19 @@ class GaussianDiffusion(Module):
 
         return img
 
+    def noise_assignment(self, x_start, noise):
+        x_start, noise = tuple(rearrange(t, 'b ... -> b (...)') for t in (x_start, noise))
+        dist = torch.cdist(x_start, noise)
+        _, assign = linear_sum_assignment(dist.cpu())
+        return torch.from_numpy(assign).to(dist.device)
+
     @autocast(enabled = False)
     def q_sample(self, x_start, t, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
+
+        if self.immiscible:
+            assign = self.noise_assignment(x_start, noise)
+            noise = noise[assign]
 
         return (
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +

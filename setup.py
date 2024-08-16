@@ -23,6 +23,7 @@ setup(
     'numpy',
     'pillow',
     'pytorch-fid',
+    'scipy',
     'torch',
     'torchvision',
     'tqdm'
