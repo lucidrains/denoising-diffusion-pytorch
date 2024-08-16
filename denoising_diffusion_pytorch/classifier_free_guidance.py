@@ -368,12 +368,13 @@ class Unet(nn.Module):
         scaled_logits = null_logits + (logits - null_logits) * cond_scale
 
         if rescaled_phi == 0.:
-            return scaled_logits
+            return scaled_logits, null_logits
 
         std_fn = partial(torch.std, dim = tuple(range(1, scaled_logits.ndim)), keepdim = True)
         rescaled_logits = scaled_logits * (std_fn(logits) / std_fn(scaled_logits))
+        interpolated_rescaled_logits = rescaled_logits * rescaled_phi + scaled_logits * (1. - rescaled_phi)
 
-        return rescaled_logits * rescaled_phi + scaled_logits * (1. - rescaled_phi)
+        return interpolated_rescaled_logits, null_logits
 
     def forward(
         self,
@@ -478,7 +479,8 @@ class GaussianDiffusion(nn.Module):
         ddim_sampling_eta = 1.,
         offset_noise_strength = 0.,
         min_snr_loss_weight = False,
-        min_snr_gamma = 5
+        min_snr_gamma = 5,
+        use_cfg_plus_plus = False # https://arxiv.org/pdf/2406.08070
     ):
         super().__init__()
         assert not (type(self) == GaussianDiffusion and model.channels != model.out_dim)
@@ -506,6 +508,10 @@ class GaussianDiffusion(nn.Module):
 
         timesteps, = betas.shape
         self.num_timesteps = int(timesteps)
+
+        # use cfg++ when ddim sampling
+
+        self.use_cfg_plus_plus = use_cfg_plus_plus
 
         # sampling related parameters
 
@@ -604,24 +610,33 @@ class GaussianDiffusion(nn.Module):
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def model_predictions(self, x, t, classes, cond_scale = 6., rescaled_phi = 0.7, clip_x_start = False):
-        model_output = self.model.forward_with_cond_scale(x, t, classes, cond_scale = cond_scale, rescaled_phi = rescaled_phi)
+        model_output, model_output_null = self.model.forward_with_cond_scale(x, t, classes, cond_scale = cond_scale, rescaled_phi = rescaled_phi)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
-            pred_noise = model_output
+            pred_noise = model_output if not self.use_cfg_plus_plus else model_output_null
+
             x_start = self.predict_start_from_noise(x, t, pred_noise)
             x_start = maybe_clip(x_start)
 
         elif self.objective == 'pred_x0':
             x_start = model_output
             x_start = maybe_clip(x_start)
-            pred_noise = self.predict_noise_from_start(x, t, x_start)
+            x_start_for_pred_noise = x_start if not self.use_cfg_plus_plus else maybe_clip(model_output_null)
+
+            pred_noise = self.predict_noise_from_start(x, t, x_start_for_pred_noise)
 
         elif self.objective == 'pred_v':
             v = model_output
             x_start = self.predict_start_from_v(x, t, v)
             x_start = maybe_clip(x_start)
-            pred_noise = self.predict_noise_from_start(x, t, x_start)
+
+            x_start_for_pred_noise = x_start
+            if self.use_cfg_plus_plus:
+                x_start_for_pred_noise = self.predict_start_from_v(x, t, model_output_null)
+                x_start_for_pred_noise = maybe_clip(x_start_for_pred_noise)
+
+            pred_noise = self.predict_noise_from_start(x, t, x_start_for_pred_noise)
 
         return ModelPrediction(pred_noise, x_start)
 
