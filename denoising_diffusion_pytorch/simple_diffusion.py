@@ -6,7 +6,7 @@ from torch import sqrt
 from torch import nn, einsum
 import torch.nn.functional as F
 from torch.special import expm1
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 from tqdm import tqdm
 from einops import rearrange, repeat, reduce, pack, unpack
@@ -651,7 +651,7 @@ class GaussianDiffusion(nn.Module):
 
     # training related functions - noise prediction
 
-    @autocast(enabled = False)
+    @autocast('cuda', enabled = False)
     def q_sample(self, x_start, times, noise = None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 

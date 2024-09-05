@@ -9,7 +9,7 @@ import torch
 from torch import nn, einsum, Tensor
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
 
@@ -660,7 +660,7 @@ class GaussianDiffusion1D(Module):
 
         return img
 
-    @autocast(enabled = False)
+    @autocast('cuda', enabled = False)
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 

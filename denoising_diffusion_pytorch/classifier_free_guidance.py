@@ -9,7 +9,7 @@ from multiprocessing import cpu_count
 import torch
 from torch import nn, einsum
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange
@@ -731,7 +731,7 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
-    @autocast(enabled = False)
+    @autocast('cuda', enabled = False)
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
