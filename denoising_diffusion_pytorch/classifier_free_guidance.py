@@ -11,7 +11,7 @@ from torch import nn, einsum
 import torch.nn.functional as F
 from torch.amp import autocast
 
-from einops import rearrange, reduce, repeat
+from einops import rearrange, reduce, repeat, pack, unpack
 from einops.layers.torch import Rearrange
 
 from tqdm.auto import tqdm
@@ -54,6 +54,15 @@ def convert_image_to_fn(img_type, image):
         return image.convert(img_type)
     return image
 
+def pack_one_with_inverse(x, pattern):
+    packed, packed_shape = pack([x], pattern)
+
+    def inverse(x, inverse_pattern = None):
+        inverse_pattern = default(inverse_pattern, pattern)
+        return unpack(x, packed_shape, inverse_pattern)[0]
+
+    return packed, inverse
+
 # normalization functions
 
 def normalize_to_neg_one_to_one(img):
@@ -74,6 +83,19 @@ def prob_mask_like(shape, prob, device):
         return torch.zeros(shape, device = device, dtype = torch.bool)
     else:
         return torch.zeros(shape, device = device).float().uniform_(0, 1) < prob
+
+def project(x, y):
+    x, inverse = pack_one_with_inverse(x, 'b *')
+    y, _ = pack_one_with_inverse(y, 'b *')
+
+    dtype = x.dtype
+    x, y = x.double(), y.double()
+    unit = F.normalize(y, dim = -1)
+
+    parallel = (x * unit).sum(dim = -1, keepdim = True) * unit
+    orthogonal = x - parallel
+
+    return inverse(parallel).to(dtype), inverse(orthogonal).to(dtype)
 
 # small helper modules
 
@@ -357,6 +379,8 @@ class Unet(nn.Module):
         *args,
         cond_scale = 1.,
         rescaled_phi = 0.,
+        remove_parallel_component = True,
+        keep_parallel_frac = 0.,
         **kwargs
     ):
         logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
@@ -365,7 +389,13 @@ class Unet(nn.Module):
             return logits
 
         null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
-        scaled_logits = null_logits + (logits - null_logits) * cond_scale
+        update = logits - null_logits
+
+        if remove_parallel_component:
+            parallel, orthog = project(update, logits)
+            update = orthog + parallel * keep_parallel_frac
+
+        scaled_logits = logits + update * (cond_scale - 1.)
 
         if rescaled_phi == 0.:
             return scaled_logits, null_logits
