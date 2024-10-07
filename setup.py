@@ -24,7 +24,7 @@ setup(
     'pillow',
     'pytorch-fid',
     'scipy',
-    'torch',
+    'torch>=2.0',
     'torchvision',
     'tqdm'
   ],
