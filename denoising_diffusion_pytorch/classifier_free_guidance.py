@@ -646,7 +646,7 @@ class GaussianDiffusion(nn.Module):
         if self.objective == 'pred_noise':
             pred_noise = model_output if not self.use_cfg_plus_plus else model_output_null
 
-            x_start = self.predict_start_from_noise(x, t, pred_noise)
+            x_start = self.predict_start_from_noise(x, t, model_output)
             x_start = maybe_clip(x_start)
 
         elif self.objective == 'pred_x0':
