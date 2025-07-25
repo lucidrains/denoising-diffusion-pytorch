@@ -423,12 +423,18 @@ class GaussianDiffusion1D(Module):
         objective = 'pred_noise',
         beta_schedule = 'cosine',
         ddim_sampling_eta = 0.,
-        auto_normalize = True
+        auto_normalize = True,
+        channels = None,
+        self_condition = None,
+        channel_first = True
     ):
         super().__init__()
         self.model = model
-        self.channels = self.model.channels
-        self.self_condition = self.model.self_condition
+        self.channels = default(channels, lambda: self.model.channels)
+        self.self_condition = default(self_condition, lambda: self.model.self_condition)
+
+        self.channel_first = channel_first
+        self.seq_index = -2 if not channel_first else -1
 
         self.seq_length = seq_length
 
@@ -638,7 +644,9 @@ class GaussianDiffusion1D(Module):
     def sample(self, batch_size = 16):
         seq_length, channels = self.seq_length, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
-        return sample_fn((batch_size, channels, seq_length))
+
+        shape = (batch_size, channels, seq_length) if self.channel_first else (batch_size, seq_length, channels)
+        return sample_fn(shape)
 
     @torch.no_grad()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
@@ -669,8 +677,10 @@ class GaussianDiffusion1D(Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, noise = None):
-        b, c, n = x_start.shape
+    def p_losses(self, x_start, t, noise = None, model_forward_kwargs: dict = dict()):
+        b = x_start.shape[0]
+        n = x_start.shape[self.seq_index]
+
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         # noise sample
@@ -687,9 +697,13 @@ class GaussianDiffusion1D(Module):
                 x_self_cond = self.model_predictions(x, t).pred_x_start
                 x_self_cond.detach_()
 
+            model_forward_kwargs = {**model_forward_kwargs, 'self_cond': x_self_cond}
+
+        # model kwargs
+
         # predict and take gradient step
 
-        model_out = self.model(x, t, x_self_cond)
+        model_out = self.model(x, t, **model_forward_kwargs)
 
         if self.objective == 'pred_noise':
             target = noise
@@ -708,7 +722,8 @@ class GaussianDiffusion1D(Module):
         return loss.mean()
 
     def forward(self, img, *args, **kwargs):
-        b, c, n, device, seq_length, = *img.shape, img.device, self.seq_length
+        b, n, device, seq_length, = img.shape[0], img.shape[self.seq_index], img.device, self.seq_length
+
         assert n == seq_length, f'seq length must be {seq_length}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
