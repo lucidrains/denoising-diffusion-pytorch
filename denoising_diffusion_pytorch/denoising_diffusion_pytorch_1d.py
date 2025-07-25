@@ -574,8 +574,12 @@ class GaussianDiffusion1D(Module):
 
         return ModelPrediction(pred_noise, x_start)
 
-    def p_mean_variance(self, x, t, x_self_cond = None, clip_denoised = True):
-        preds = self.model_predictions(x, t, x_self_cond)
+    def p_mean_variance(self, x, t, x_self_cond = None, clip_denoised = True, model_forward_kwargs: dict = dict()):
+
+        if exists(x_self_cond):
+            model_forward_kwargs = {**model_forward_kwargs, 'self_cond': x_self_cond}
+
+        preds = self.model_predictions(x, t, **model_forward_kwargs)
         x_start = preds.pred_x_start
 
         if clip_denoised:
@@ -585,38 +589,44 @@ class GaussianDiffusion1D(Module):
         return model_mean, posterior_variance, posterior_log_variance, x_start
 
     @torch.no_grad()
-    def p_sample(self, x, t: int, x_self_cond = None, clip_denoised = True):
+    def p_sample(self, x, t: int, x_self_cond = None, clip_denoised = True, model_forward_kwargs: dict = dict()):
         b, *_, device = *x.shape, x.device
         batched_times = torch.full((b,), t, device = x.device, dtype = torch.long)
-        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = clip_denoised)
+        model_mean, _, model_log_variance, x_start = self.p_mean_variance(x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = clip_denoised, model_forward_kwargs = model_forward_kwargs)
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
 
     @torch.no_grad()
-    def p_sample_loop(self, shape):
+    def p_sample_loop(self, shape, return_noise = False, model_forward_kwargs: dict = dict()):
         batch, device = shape[0], self.betas.device
 
-        img = torch.randn(shape, device=device)
+        noise = torch.randn(shape, device=device)
+        img = noise 
 
         x_start = None
 
         for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', total = self.num_timesteps):
             self_cond = x_start if self.self_condition else None
-            img, x_start = self.p_sample(img, t, self_cond)
+            img, x_start = self.p_sample(img, t, self_cond, model_forward_kwargs = model_forward_kwargs)
 
         img = self.unnormalize(img)
-        return img
+
+        if not return_noise:
+            return img
+
+        return img, noise
 
     @torch.no_grad()
-    def ddim_sample(self, shape, clip_denoised = True, model_forward_kwargs: dict = dict()):
+    def ddim_sample(self, shape, clip_denoised = True, model_forward_kwargs: dict = dict(), return_noise = False):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
-        img = torch.randn(shape, device = device)
+        noise = torch.randn(shape, device = device)
+        img = noise
 
         x_start = None
 
@@ -642,15 +652,19 @@ class GaussianDiffusion1D(Module):
                   sigma * noise
 
         img = self.unnormalize(img)
-        return img
+
+        if not return_noise:
+            return img
+
+        return img, noise
 
     @torch.no_grad()
-    def sample(self, batch_size = 16, model_forward_kwargs: dict = dict()):
+    def sample(self, batch_size = 16, return_noise = False, model_forward_kwargs: dict = dict()):
         seq_length, channels = self.seq_length, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
 
         shape = (batch_size, channels, seq_length) if self.channel_first else (batch_size, seq_length, channels)
-        return sample_fn(shape, model_forward_kwargs = model_forward_kwargs)
+        return sample_fn(shape, return_noise = return_noise, model_forward_kwargs = model_forward_kwargs)
 
     @torch.no_grad()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
