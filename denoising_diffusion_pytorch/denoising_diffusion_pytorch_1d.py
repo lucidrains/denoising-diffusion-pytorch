@@ -545,8 +545,12 @@ class GaussianDiffusion1D(Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False, rederive_pred_noise = False):
-        model_output = self.model(x, t, x_self_cond)
+    def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False, rederive_pred_noise = False, model_forward_kwargs: dict = dict()):
+
+        if exists(x_self_cond):
+            model_forward_kwargs = {**model_forward_kwargs, 'self_cond': x_self_cond}
+
+        model_output = self.model(x, t, **model_forward_kwargs)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
 
         if self.objective == 'pred_noise':
@@ -605,7 +609,7 @@ class GaussianDiffusion1D(Module):
         return img
 
     @torch.no_grad()
-    def ddim_sample(self, shape, clip_denoised = True):
+    def ddim_sample(self, shape, clip_denoised = True, model_forward_kwargs: dict = dict()):
         batch, device, total_timesteps, sampling_timesteps, eta, objective = shape[0], self.betas.device, self.num_timesteps, self.sampling_timesteps, self.ddim_sampling_eta, self.objective
 
         times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)   # [-1, 0, 1, 2, ..., T-1] when sampling_timesteps == total_timesteps
@@ -619,7 +623,7 @@ class GaussianDiffusion1D(Module):
         for time, time_next in tqdm(time_pairs, desc = 'sampling loop time step'):
             time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
             self_cond = x_start if self.self_condition else None
-            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, self_cond, clip_x_start = clip_denoised)
+            pred_noise, x_start, *_ = self.model_predictions(img, time_cond, self_cond, clip_x_start = clip_denoised, model_forward_kwargs = model_forward_kwargs)
 
             if time_next < 0:
                 img = x_start
@@ -641,12 +645,12 @@ class GaussianDiffusion1D(Module):
         return img
 
     @torch.no_grad()
-    def sample(self, batch_size = 16):
+    def sample(self, batch_size = 16, model_forward_kwargs: dict = dict()):
         seq_length, channels = self.seq_length, self.channels
         sample_fn = self.p_sample_loop if not self.is_ddim_sampling else self.ddim_sample
 
         shape = (batch_size, channels, seq_length) if self.channel_first else (batch_size, seq_length, channels)
-        return sample_fn(shape)
+        return sample_fn(shape, model_forward_kwargs = model_forward_kwargs)
 
     @torch.no_grad()
     def interpolate(self, x1, x2, t = None, lam = 0.5):
