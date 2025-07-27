@@ -695,7 +695,7 @@ class GaussianDiffusion1D(Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, noise = None, model_forward_kwargs: dict = dict()):
+    def p_losses(self, x_start, t, noise = None, model_forward_kwargs: dict = dict(), return_reduced_loss = True):
         b = x_start.shape[0]
         n = x_start.shape[self.seq_index]
 
@@ -737,7 +737,11 @@ class GaussianDiffusion1D(Module):
         loss = reduce(loss, 'b ... -> b', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
-        return loss.mean()
+
+        if return_reduced_loss:
+            loss = loss.mean()
+
+        return loss
 
     def forward(self, img, *args, **kwargs):
         b, n, device, seq_length, = img.shape[0], img.shape[self.seq_index], img.device, self.seq_length
