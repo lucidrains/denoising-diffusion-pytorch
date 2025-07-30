@@ -734,14 +734,15 @@ class GaussianDiffusion1D(Module):
             raise ValueError(f'unknown objective {self.objective}')
 
         loss = F.mse_loss(model_out, target, reduction = 'none')
+
+        if not return_reduced_loss:
+            return loss * extract(self.loss_weight, t, loss.shape)
+
         loss = reduce(loss, 'b ... -> b', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
 
-        if return_reduced_loss:
-            loss = loss.mean()
-
-        return loss
+        return loss.mean()
 
     def forward(self, img, *args, **kwargs):
         b, n, device, seq_length, = img.shape[0], img.shape[self.seq_index], img.device, self.seq_length
