@@ -103,6 +103,34 @@ Then, in the same directory
 $ accelerate launch train.py
 ```
 
+## Sampling Images from Saved Model Weights
+
+After training the model, the model artifacts (checkpoints) will be saved in the `results` folder. The checkpoints are typically saved as `model-{epoch}.pt`, where `{epoch}` is the epoch number. Make sure to note the epoch number of the checkpoint you want to use for sampling.
+
+
+Example Command Line Usage of `sampler.py`
+
+```python
+python script.py --num_samples 10 --image_path "\path\to\train_images" --train_load_num 44 --dim 32 --dim_mults 1 2 4 8 --sampling_timesteps 100 --batch_size 4 --image_size 128 --output_folder "\path\to\gen_images"
+
+```
+
+
+##### Required Arguments
+
+* **`--num_samples`**: Number of images to generate (integer).
+* **`--image_path`**: Path to the directory containing the training images (string). This folder should contain at least 100 images, as the trainer class checks this before initializing the model.
+* **`--train_load_num`**: Checkpoint number to load the pre-trained model (integer). For example, if the checkpoint is `model-44.pt`, pass `44` for the `train_load_num` argument.
+* **`--dim`**: Base dimension size for the U-Net model (integer). This should match the dimension used during training.
+* **`--dim_mults`**: List of dimension multipliers for the U-Net (space-separated integers, e.g., `1 2 4 8`). This should be the same as used during training.
+
+##### Optional Arguments
+
+* **`--sampling_timesteps`**: Number of sampling timesteps (default: `100`, max: `1000`).
+* **`--batch_size`**: Batch size for generation (default: `4`).
+* **`--image_size`**: Size of the generated images (default: `128`, e.g., `128x128`). This should match the image size used during training.
+* **`--output_folder`**: Folder to save the generated images (default: `gen_images`).
+
 ## Miscellaneous
 
 ### 1D Sequence
