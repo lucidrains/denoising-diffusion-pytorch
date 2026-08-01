@@ -2,9 +2,11 @@ import torch
 from collections import namedtuple
 from math import pi, sqrt, log as ln
 from inspect import isfunction
-from torch import nn, einsum
-from einops import rearrange
 
+from einops import rearrange, reduce
+
+from torch import nn, einsum
+import torch.nn.functional as F
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion, extract, unnormalize_to_zero_to_one
 
 # constants
@@ -119,7 +121,7 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         return model_mean, model_variance, model_log_variance, x_start
 
-    def p_losses(self, x_start, t, noise = None, clip_denoised = False):
+    def p_losses(self, x_start, t, noise = None, clip_denoised = False, loss_reduction = 'mean'):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
@@ -150,6 +152,12 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         pred_noise, _ = model_output.chunk(2, dim = 1)
 
-        simple_losses = F.mse_loss(pred_noise, noise)
+        simple_losses = F.mse_loss(pred_noise, noise, reduction = 'none')
+        simple_losses = reduce(simple_losses, 'b ... -> b', 'mean')
 
-        return simple_losses + vb_losses.mean() * self.vb_loss_weight
+        total_loss = simple_losses + vb_losses * self.vb_loss_weight
+
+        if loss_reduction == 'none':
+            return total_loss
+
+        return total_loss.mean()

@@ -244,7 +244,7 @@ class ElucidatedDiffusion(nn.Module):
     def noise_distribution(self, batch_size):
         return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
 
-    def forward(self, images):
+    def forward(self, images, loss_reduction = 'mean'):
         batch_size, c, h, w, device, image_size, channels = *images.shape, images.device, self.image_size, self.channels
 
         assert h == image_size and w == image_size, f'height and width of image must be {image_size}'
@@ -273,5 +273,8 @@ class ElucidatedDiffusion(nn.Module):
         losses = reduce(losses, 'b ... -> b', 'mean')
 
         losses = losses * self.loss_weight(sigmas)
+
+        if loss_reduction == 'none':
+            return losses
 
         return losses.mean()

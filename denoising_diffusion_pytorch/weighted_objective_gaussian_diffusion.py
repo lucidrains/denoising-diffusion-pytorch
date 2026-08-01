@@ -1,9 +1,11 @@
 import torch
 from inspect import isfunction
+import torch.nn.functional as F
 from torch import nn, einsum
-from einops import rearrange
+from einops import rearrange, reduce
 
 from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion
+
 
 # helper functions
 
@@ -45,7 +47,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         normalized_weights = weights.softmax(dim = 1)
 
         x_start_from_noise = self.predict_start_from_noise(x, t = t, noise = pred_noise)
-        
+
         x_starts = torch.stack((x_start_from_noise, pred_x_start), dim = 1)
         weighted_x_start = einsum('b j h w, b j c h w -> b c h w', normalized_weights, x_starts)
 
@@ -56,7 +58,7 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
 
         return model_mean, model_variance, model_log_variance
 
-    def p_losses(self, x_start, t, noise = None, clip_denoised = False):
+    def p_losses(self, x_start, t, noise = None, clip_denoised = False, loss_reduction = 'mean'):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start = x_start, t = t, noise = noise)
 
@@ -66,8 +68,11 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
         # get loss for predicted noise and x_start
         # with the loss weight given at initialization
 
-        noise_loss = F.mse_loss(noise, pred_noise) * self.pred_noise_loss_weight
-        x_start_loss = F.mse_loss(x_start, pred_x_start) * self.pred_x_start_loss_weight
+        noise_loss = F.mse_loss(noise, pred_noise, reduction = 'none')
+        noise_loss = reduce(noise_loss, 'b ... -> b', 'mean') * self.pred_noise_loss_weight
+
+        x_start_loss = F.mse_loss(x_start, pred_x_start, reduction = 'none')
+        x_start_loss = reduce(x_start_loss, 'b ... -> b', 'mean') * self.pred_x_start_loss_weight
 
         # calculate x_start from predicted noise
         # then do a weighted sum of the x_start prediction, weights also predicted by the model (softmax normalized)
@@ -78,5 +83,12 @@ class WeightedObjectiveGaussianDiffusion(GaussianDiffusion):
 
         # main loss to x_start with the weighted one
 
-        weighted_x_start_loss = F.mse_loss(x_start, weighted_x_start)
-        return weighted_x_start_loss + x_start_loss + noise_loss
+        weighted_x_start_loss = F.mse_loss(x_start, weighted_x_start, reduction = 'none')
+        weighted_x_start_loss = reduce(weighted_x_start_loss, 'b ... -> b', 'mean')
+
+        total_loss = weighted_x_start_loss + x_start_loss + noise_loss
+
+        if loss_reduction == 'none':
+            return total_loss
+
+        return total_loss.mean()

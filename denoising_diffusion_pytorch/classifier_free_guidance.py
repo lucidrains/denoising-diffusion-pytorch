@@ -417,7 +417,7 @@ class Unet(nn.Module):
 
         cond_drop_prob = default(cond_drop_prob, self.cond_drop_prob)
 
-        # derive condition, with condition dropout for classifier free guidance        
+        # derive condition, with condition dropout for classifier free guidance
 
         classes_emb = self.classes_emb(classes)
 
@@ -774,7 +774,7 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, *, classes, noise = None):
+    def p_losses(self, x_start, t, *, classes, noise = None, loss_reduction = 'mean'):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
 
@@ -800,15 +800,19 @@ class GaussianDiffusion(nn.Module):
         loss = reduce(loss, 'b ... -> b', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
+
+        if loss_reduction == 'none':
+            return loss
+
         return loss.mean()
 
-    def forward(self, img, *args, **kwargs):
+    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = normalize_to_neg_one_to_one(img)
-        return self.p_losses(img, t, *args, **kwargs)
+        return self.p_losses(img, t, *args, loss_reduction = loss_reduction, **kwargs)
 
 # example
 
@@ -850,4 +854,3 @@ if __name__ == '__main__':
         training_images[:1],
         image_classes[:1]
     )
-

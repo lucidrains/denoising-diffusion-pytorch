@@ -785,7 +785,7 @@ class GaussianDiffusion(Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, noise = None, offset_noise_strength = None):
+    def p_losses(self, x_start, t, noise = None, offset_noise_strength = None, loss_reduction = 'mean'):
         b, c, h, w = x_start.shape
 
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -830,15 +830,19 @@ class GaussianDiffusion(Module):
         loss = reduce(loss, 'b ... -> b', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
+
+        if loss_reduction == 'none':
+            return loss
+
         return loss.mean()
 
-    def forward(self, img, *args, **kwargs):
+    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size[0] and w == img_size[1], f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = self.normalize(img)
-        return self.p_losses(img, t, *args, **kwargs)
+        return self.p_losses(img, t, *args, loss_reduction = loss_reduction, **kwargs)
 
 # dataset classes
 

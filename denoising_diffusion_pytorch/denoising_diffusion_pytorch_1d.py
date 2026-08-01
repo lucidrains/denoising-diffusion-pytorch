@@ -221,7 +221,7 @@ class LinearAttention(Module):
         q = q.softmax(dim = -2)
         k = k.softmax(dim = -1)
 
-        q = q * self.scale        
+        q = q * self.scale
 
         context = torch.einsum('b h d n, b h e n -> b h d e', k, v)
 
@@ -602,7 +602,7 @@ class GaussianDiffusion1D(Module):
         batch, device = shape[0], self.betas.device
 
         noise = torch.randn(shape, device=device)
-        img = noise 
+        img = noise
 
         x_start = None
 
@@ -695,7 +695,7 @@ class GaussianDiffusion1D(Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, noise = None, model_forward_kwargs: dict = dict(), return_reduced_loss = True):
+    def p_losses(self, x_start, t, noise = None, model_forward_kwargs: dict = dict(), return_reduced_loss = True, loss_reduction = 'mean'):
         b = x_start.shape[0]
         n = x_start.shape[self.seq_index]
 
@@ -742,16 +742,19 @@ class GaussianDiffusion1D(Module):
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
 
+        if loss_reduction == 'none':
+            return loss
+
         return loss.mean()
 
-    def forward(self, img, *args, **kwargs):
+    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
         b, n, device, seq_length, = img.shape[0], img.shape[self.seq_index], img.device, self.seq_length
 
         assert n == seq_length, f'seq length must be {seq_length}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = self.normalize(img)
-        return self.p_losses(img, t, *args, **kwargs)
+        return self.p_losses(img, t, *args, loss_reduction = loss_reduction, **kwargs)
 
 # trainer class
 

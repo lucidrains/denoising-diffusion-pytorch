@@ -250,7 +250,7 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         # times are now uniform from 0 to 1
         return torch.zeros((batch_size,), device = self.device).float().uniform_(0, 1)
 
-    def p_losses(self, x_start, times, noise = None):
+    def p_losses(self, x_start, times, noise = None, loss_reduction = 'mean'):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         x, log_snr = self.q_sample(x_start = x_start, times = times, noise = noise)
@@ -264,12 +264,15 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
             loss_weight = snr.clamp(max = self.min_snr_gamma) / snr
             losses = losses * loss_weight
 
+        if loss_reduction == 'none':
+            return losses
+
         return losses.mean()
 
-    def forward(self, img, *args, **kwargs):
+    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
 
         times = self.random_times(b)
         img = normalize_to_neg_one_to_one(img)
-        return self.p_losses(img, times, *args, **kwargs)
+        return self.p_losses(img, times, *args, loss_reduction = loss_reduction, **kwargs)

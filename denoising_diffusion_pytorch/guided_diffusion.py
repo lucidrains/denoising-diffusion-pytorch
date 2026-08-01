@@ -414,9 +414,9 @@ def sigmoid_beta_schedule(timesteps, start = -3, end = 3, tau = 1, clamp_min = 1
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     return torch.clip(betas, 0, 0.999)
-    
 
-    
+
+
 class GaussianDiffusion(nn.Module):
     def __init__(
         self,
@@ -589,7 +589,7 @@ class GaussianDiffusion(nn.Module):
 
         model_mean, posterior_variance, posterior_log_variance = self.q_posterior(x_start = x_start, x_t = x, t = t)
         return model_mean, posterior_variance, posterior_log_variance, x_start
-     
+
     def condition_mean(self, cond_fn, mean,variance, x, t, guidance_kwargs=None):
         """
         Compute the mean for the previous step, given a function cond_fn that
@@ -608,7 +608,7 @@ class GaussianDiffusion(nn.Module):
         print("gradient: ",(variance * gradient.float()).mean())
         return new_mean
 
-        
+
     @torch.no_grad()
     def p_sample(self, x, t: int, x_self_cond = None, cond_fn=None, guidance_kwargs=None):
         b, *_, device = *x.shape, x.device
@@ -618,7 +618,7 @@ class GaussianDiffusion(nn.Module):
         )
         if exists(cond_fn) and exists(guidance_kwargs):
             model_mean = self.condition_mean(cond_fn, model_mean, variance, x, batched_times, guidance_kwargs)
-        
+
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
         pred_img = model_mean + (0.5 * model_log_variance).exp() * noise
         return pred_img, x_start
@@ -718,7 +718,7 @@ class GaussianDiffusion(nn.Module):
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def p_losses(self, x_start, t, noise = None):
+    def p_losses(self, x_start, t, noise = None, loss_reduction = 'mean'):
         b, c, h, w = x_start.shape
         noise = default(noise, lambda: torch.randn_like(x_start))
 
@@ -754,15 +754,19 @@ class GaussianDiffusion(nn.Module):
         loss = reduce(loss, 'b ... -> b', 'mean')
 
         loss = loss * extract(self.loss_weight, t, loss.shape)
+
+        if loss_reduction == 'none':
+            return loss
+
         return loss.mean()
 
-    def forward(self, img, *args, **kwargs):
+    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
         t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
 
         img = self.normalize(img)
-        return self.p_losses(img, t, *args, **kwargs)
+        return self.p_losses(img, t, *args, loss_reduction = loss_reduction, **kwargs)
 
 # dataset classes
 
@@ -975,7 +979,7 @@ if __name__ == '__main__':
             t = t.view(B, 1)
             logits = self.linear_t(t.float()) + self.linear_img(x.view(x.shape[0], -1))
             return logits
-        
+
     def classifier_cond_fn(x, t, classifier, y, classifier_scale=1):
         """
         return the graident of the classifier outputing y wrt x.
@@ -989,9 +993,9 @@ if __name__ == '__main__':
             selected = log_probs[range(len(logits)), y.view(-1)]
             grad = torch.autograd.grad(selected.sum(), x_in)[0] * classifier_scale
             return grad
-        
-    
-    
+
+
+
     model = Unet(
         dim = 64,
         dim_mults = (1, 2, 4, 8)
@@ -1007,7 +1011,7 @@ if __name__ == '__main__':
     batch_size = 4
     sampled_images = diffusion.sample(
         batch_size = batch_size,
-        cond_fn=classifier_cond_fn, 
+        cond_fn=classifier_cond_fn,
         guidance_kwargs={
             "classifier":classifier,
             "y":torch.fill(torch.zeros(batch_size), 1).long(),

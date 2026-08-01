@@ -87,6 +87,39 @@ trainer.train()
 
 Samples and model checkpoints will be logged to `./results` periodically
 
+## Explorative Modeling (Forward XM)
+
+To use <a href="https://arxiv.org/abs/2607.27372">Explorative Modeling (Forward XM)</a> for multi-candidate loss calculation during training, wrap any diffusion model in `XMWrapper`.
+
+```python
+import torch
+from denoising_diffusion_pytorch import Unet, GaussianDiffusion, XMWrapper
+
+model = Unet(
+    dim = 64,
+    dim_mults = (1, 2, 4, 8)
+)
+
+diffusion = GaussianDiffusion(
+    model,
+    image_size = 128,
+    timesteps = 1000
+)
+
+xm = XMWrapper(
+    diffusion,
+    candidates = 4 # generate 4 candidates per sample and pick minimum loss
+)
+
+training_images = torch.rand(8, 3, 128, 128)
+loss = xm(training_images)
+loss.backward()
+
+# sampling works as usual
+
+sampled_images = xm.sample(batch_size = 4)
+```
+
 ## Multi-GPU Training
 
 The `Trainer` class is now equipped with <a href="https://huggingface.co/docs/accelerate/accelerator">🤗 Accelerator</a>. You can easily do multi-gpu training in two steps using their `accelerate` CLI
@@ -384,5 +417,17 @@ You could consider adding a suitable metric to the training loop yourself after 
     author  = {Seyedmorteza Sadat and Otmar Hilliges and Romann M. Weber},
     year    = {2024},
     url     = {https://api.semanticscholar.org/CorpusID:273098845}
+}
+```
+
+```bibtex
+@misc{gladstone2026explorativemodelingunlockingpretraining,
+    title   = {Explorative Modeling: Unlocking a Third Pretraining Axis and End-to-End Generation},
+    author  = {Alexi Gladstone and Heng Ji and Yilun Du},
+    year    = {2026},
+    eprint  = {2607.27372},
+    archivePrefix = {arXiv},
+    primaryClass = {cs.LG},
+    url     = {https://arxiv.org/abs/2607.27372},
 }
 ```
