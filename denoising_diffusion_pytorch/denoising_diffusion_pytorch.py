@@ -836,13 +836,17 @@ class GaussianDiffusion(Module):
 
         return loss.mean()
 
-    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
+    def random_times(self, batch_size):
+        return torch.randint(0, self.num_timesteps, (batch_size,), device = self.device).long()
+
+    def forward(self, img, *args, times = None, loss_reduction = 'mean', **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size[0] and w == img_size[1], f'height and width of image must be {img_size}'
-        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+
+        times = default(times, lambda: self.random_times(b))
 
         img = self.normalize(img)
-        return self.p_losses(img, t, *args, loss_reduction = loss_reduction, **kwargs)
+        return self.p_losses(img, times, *args, loss_reduction = loss_reduction, **kwargs)
 
 # dataset classes
 

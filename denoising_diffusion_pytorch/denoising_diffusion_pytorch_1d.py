@@ -545,6 +545,10 @@ class GaussianDiffusion1D(Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
+    @property
+    def device(self):
+        return self.betas.device
+
     def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False, rederive_pred_noise = False, model_forward_kwargs: dict = dict()):
 
         if exists(x_self_cond):
@@ -747,14 +751,18 @@ class GaussianDiffusion1D(Module):
 
         return loss.mean()
 
-    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
+    def random_times(self, batch_size):
+        return torch.randint(0, self.num_timesteps, (batch_size,), device = self.device).long()
+
+    def forward(self, img, *args, times = None, loss_reduction = 'mean', **kwargs):
         b, n, device, seq_length, = img.shape[0], img.shape[self.seq_index], img.device, self.seq_length
 
         assert n == seq_length, f'seq length must be {seq_length}'
-        t = torch.randint(0, self.num_timesteps, (b,), device=device).long()
+
+        times = default(times, lambda: self.random_times(b))
 
         img = self.normalize(img)
-        return self.p_losses(img, t, *args, loss_reduction = loss_reduction, **kwargs)
+        return self.p_losses(img, times, *args, loss_reduction = loss_reduction, **kwargs)
 
 # trainer class
 

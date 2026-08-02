@@ -1,5 +1,6 @@
 from inspect import signature
 
+import torch
 from torch.nn import Module
 from torch import cat, is_tensor
 from torch.utils._pytree import tree_map, tree_flatten
@@ -30,7 +31,9 @@ class XMWrapper(Module):
         self,
         flow_model: Module,
         candidates = 1,
-        max_batch_size = None
+        max_batch_size = None,
+        random_time_method = 'random_times',
+        random_time_kwarg = 'times'
     ):
         super().__init__()
         self.flow_model = flow_model
@@ -39,6 +42,9 @@ class XMWrapper(Module):
         self.candidates = candidates
         self.max_batch_size = max_batch_size
         self.has_loss_reduction = 'loss_reduction' in signature(flow_model.forward).parameters
+
+        self.random_time_method = random_time_method
+        self.random_time_kwarg = random_time_kwarg
 
     @property
     def data_shape(self):
@@ -70,6 +76,11 @@ class XMWrapper(Module):
         leaves, _ = tree_flatten((args, kwargs))
         first_tensor = next(t for t in leaves if is_tensor(t))
         batch = first_tensor.shape[0]
+
+        if self.random_time_kwarg not in kwargs:
+            assert hasattr(self.flow_model, self.random_time_method), f'flow_model must have a {self.random_time_method} method'
+            fn = getattr(self.flow_model, self.random_time_method)
+            kwargs[self.random_time_kwarg] = fn(batch)
 
         # repeat inputs K candidates times
 
