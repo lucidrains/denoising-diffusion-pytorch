@@ -2,12 +2,13 @@ import torch
 from collections import namedtuple
 from math import pi, sqrt, log as ln
 from inspect import isfunction
+from functools import partial
 
 from einops import rearrange, reduce
 
 from torch import nn, einsum
 import torch.nn.functional as F
-from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion, extract, unnormalize_to_zero_to_one
+from denoising_diffusion_pytorch.denoising_diffusion_pytorch import GaussianDiffusion, extract, unnormalize_to_zero_to_one, identity
 
 # constants
 
