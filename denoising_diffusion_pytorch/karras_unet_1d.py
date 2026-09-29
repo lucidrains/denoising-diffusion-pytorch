@@ -651,9 +651,9 @@ class MPFeedForward(Module):
         dim_inner = int(dim * mult)
         self.net = nn.Sequential(
             PixelNorm(dim = 1),
-            Conv2d(dim, dim_inner, 1),
+            Conv1d(dim, dim_inner, 1),
             MPSiLU(),
-            Conv2d(dim_inner, dim, 1)
+            Conv1d(dim_inner, dim, 1)
         )
 
         self.mp_add = MPAdd(t = mp_add_t)
