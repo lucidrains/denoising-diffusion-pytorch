@@ -552,7 +552,7 @@ class GaussianDiffusion1D(Module):
     def model_predictions(self, x, t, x_self_cond = None, clip_x_start = False, rederive_pred_noise = False, model_forward_kwargs: dict = dict()):
 
         if exists(x_self_cond):
-            model_forward_kwargs = {**model_forward_kwargs, 'self_cond': x_self_cond}
+            model_forward_kwargs = {**model_forward_kwargs, 'x_self_cond': x_self_cond}
 
         model_output = self.model(x, t, **model_forward_kwargs)
         maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
@@ -580,10 +580,9 @@ class GaussianDiffusion1D(Module):
 
     def p_mean_variance(self, x, t, x_self_cond = None, clip_denoised = True, model_forward_kwargs: dict = dict()):
 
-        if exists(x_self_cond):
-            model_forward_kwargs = {**model_forward_kwargs, 'self_cond': x_self_cond}
-
-        preds = self.model_predictions(x, t, **model_forward_kwargs)
+        preds = self.model_predictions(
+            x, t, x_self_cond = x_self_cond, model_forward_kwargs = model_forward_kwargs
+        )
         x_start = preds.pred_x_start
 
         if clip_denoised:
@@ -716,10 +715,12 @@ class GaussianDiffusion1D(Module):
         x_self_cond = None
         if self.self_condition and random() < 0.5:
             with torch.no_grad():
-                x_self_cond = self.model_predictions(x, t).pred_x_start
+                x_self_cond = self.model_predictions(
+                    x, t, model_forward_kwargs = model_forward_kwargs
+                ).pred_x_start
                 x_self_cond.detach_()
 
-            model_forward_kwargs = {**model_forward_kwargs, 'self_cond': x_self_cond}
+            model_forward_kwargs = {**model_forward_kwargs, 'x_self_cond': x_self_cond}
 
         # model kwargs
 
