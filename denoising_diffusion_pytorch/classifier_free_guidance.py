@@ -384,11 +384,11 @@ class Unet(nn.Module):
         **kwargs
     ):
         logits = self.forward(*args, cond_drop_prob = 0., **kwargs)
+        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
 
         if cond_scale == 1:
-            return logits
+            return logits, null_logits
 
-        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
         update = logits - null_logits
 
         if remove_parallel_component:
