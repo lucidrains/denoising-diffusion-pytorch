@@ -773,17 +773,20 @@ class GaussianDiffusion(Module):
         return torch.from_numpy(assign).to(dist.device)
 
     @autocast('cuda', enabled = False)
-    def q_sample(self, x_start, t, noise = None):
+    def q_sample(self, x_start, t, noise = None, return_noise = False):
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         if self.immiscible:
             assign = self.noise_assignment(x_start, noise)
             noise = noise[assign]
 
-        return (
+        sample = (
             extract(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
             extract(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
+
+        # Training targets must use the same noise permutation as the noisy sample.
+        return (sample, noise) if return_noise else sample
 
     def p_losses(self, x_start, t, noise = None, offset_noise_strength = None, loss_reduction = 'mean'):
         b, c, h, w = x_start.shape
@@ -800,7 +803,10 @@ class GaussianDiffusion(Module):
 
         # noise sample
 
-        x = self.q_sample(x_start = x_start, t = t, noise = noise)
+        if self.immiscible:
+            x, noise = self.q_sample(x_start = x_start, t = t, noise = noise, return_noise = True)
+        else:
+            x = self.q_sample(x_start = x_start, t = t, noise = noise)
 
         # if doing self-conditioning, 50% of the time, predict x_start from current set of times
         # and condition with unet with that
