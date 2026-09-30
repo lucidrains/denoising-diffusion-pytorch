@@ -400,8 +400,16 @@ class Unet(nn.Module):
         if rescaled_phi == 0.:
             return scaled_logits, null_logits
 
-        std_fn = partial(torch.std, dim = tuple(range(1, scaled_logits.ndim)), keepdim = True)
-        rescaled_logits = scaled_logits * (std_fn(logits) / std_fn(scaled_logits))
+        # Population standard deviations also cover a single value per sample.
+        # Compute low-precision statistics in float32 to avoid ratio overflow.
+        stats_dtype = torch.float32 if logits.dtype in (torch.float16, torch.bfloat16) else logits.dtype
+        std_fn = partial(torch.std, dim = tuple(range(1, scaled_logits.ndim)), keepdim = True, correction = 0)
+        logits_std = std_fn(logits.to(stats_dtype))
+        scaled_std = std_fn(scaled_logits.to(stats_dtype))
+        has_variance = scaled_std > 0
+        denominator = torch.where(has_variance, scaled_std, torch.ones_like(scaled_std))
+        scale = torch.where(has_variance, logits_std / denominator, torch.ones_like(scaled_std))
+        rescaled_logits = (scaled_logits.to(stats_dtype) * scale).to(scaled_logits.dtype)
         interpolated_rescaled_logits = rescaled_logits * rescaled_phi + scaled_logits * (1. - rescaled_phi)
 
         return interpolated_rescaled_logits, null_logits
