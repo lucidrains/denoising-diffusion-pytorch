@@ -218,7 +218,8 @@ class ElucidatedDiffusion(nn.Module):
 
         old_denoised = None
         for i in tqdm(range(len(sigmas) - 1)):
-            denoised = self.preconditioned_network_forward(images, sigmas[i].item())
+            self_cond = old_denoised if self.self_condition else None
+            denoised = self.preconditioned_network_forward(images, sigmas[i].item(), self_cond)
             t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
             h = t_next - t
 
