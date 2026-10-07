@@ -470,7 +470,7 @@ class Attention(Module):
         elif self.only_time:
             out = rearrange(out, '(b x y) c n -> b c (n x y)', x = h, y = w)
 
-        out = out.reshape(orig_shape)
+        out = out.reshape(b, -1, t, h, w)
 
         out = self.to_out(out)
 
