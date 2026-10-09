@@ -67,9 +67,14 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales, thres = 0.999):
 
 # i thought the results were questionable, if one were to focus only on FID
 # but may as well get this in here for others to try, as GLIDE is using it (and DALL-E2 first stage of cascade)
-# gaussian diffusion for learned variance + hybrid eps simple + vb loss
+# gaussian diffusion for learned variance + hybrid denoising objective + vb loss
 
 class LearnedGaussianDiffusion(GaussianDiffusion):
+    """Predict the configured denoising target and a learned variance interpolation.
+
+    Sample checkpoints trained with the old noise-only loss using objective='pred_noise'.
+    """
+
     def __init__(
         self,
         model,
@@ -87,23 +92,27 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         model_output = self.model(x, t)
         model_output, pred_variance = model_output.chunk(2, dim = 1)
 
-        maybe_clip = partial(torch.clamp, min = -1., max = 1.) if clip_x_start else identity
-
         if self.objective == 'pred_noise':
             pred_noise = model_output
             x_start = self.predict_start_from_noise(x, t, model_output)
 
         elif self.objective == 'pred_x0':
-            pred_noise = self.predict_noise_from_start(x, t, model_output)
             x_start = model_output
 
-        x_start = maybe_clip(x_start)
+        elif self.objective == 'pred_v':
+            x_start = self.predict_start_from_v(x, t, model_output)
+
+        if clip_x_start:
+            x_start = x_start.clamp(-1., 1.)
+
+        if self.objective != 'pred_noise' or (clip_x_start and rederive_pred_noise):
+            pred_noise = self.predict_noise_from_start(x, t, x_start)
 
         return ModelPrediction(pred_noise, x_start, pred_variance)
 
     def p_mean_variance(self, *, x, t, clip_denoised, model_output = None, **kwargs):
         model_output = default(model_output, lambda: self.model(x, t))
-        pred_noise, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
+        model_prediction, var_interp_frac_unnormalized = model_output.chunk(2, dim = 1)
 
         min_log = extract(self.posterior_log_variance_clipped, t, x.shape)
         max_log = extract(torch.log(self.betas), t, x.shape)
@@ -112,10 +121,15 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
         model_log_variance = var_interp_frac * max_log + (1 - var_interp_frac) * min_log
         model_variance = model_log_variance.exp()
 
-        x_start = self.predict_start_from_noise(x, t, pred_noise)
+        if self.objective == 'pred_noise':
+            x_start = self.predict_start_from_noise(x, t, model_prediction)
+        elif self.objective == 'pred_x0':
+            x_start = model_prediction
+        elif self.objective == 'pred_v':
+            x_start = self.predict_start_from_v(x, t, model_prediction)
 
         if clip_denoised:
-            x_start.clamp_(-1., 1.)
+            x_start = x_start.clamp(-1., 1.)
 
         model_mean, _, _ = self.q_posterior(x_start, x, t)
 
@@ -148,11 +162,18 @@ class LearnedGaussianDiffusion(GaussianDiffusion):
 
         vb_losses = torch.where(t == 0, decoder_nll, kl)
 
-        # simple loss - predicting noise, x0, or x_prev
+        # simple loss for the configured denoising objective
 
-        pred_noise, _ = model_output.chunk(2, dim = 1)
+        model_prediction, _ = model_output.chunk(2, dim = 1)
 
-        simple_losses = F.mse_loss(pred_noise, noise, reduction = 'none')
+        if self.objective == 'pred_noise':
+            target = noise
+        elif self.objective == 'pred_x0':
+            target = x_start
+        elif self.objective == 'pred_v':
+            target = self.predict_v(x_start, t, noise)
+
+        simple_losses = F.mse_loss(model_prediction, target, reduction = 'none')
         simple_losses = reduce(simple_losses, 'b ... -> b', 'mean')
 
         total_loss = simple_losses + vb_losses * self.vb_loss_weight
