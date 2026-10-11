@@ -760,7 +760,7 @@ class GaussianDiffusion(Module):
 
         x_start = None
 
-        for i in tqdm(reversed(range(0, t)), desc = 'interpolation sample time step', total = t):
+        for i in tqdm(reversed(range(0, t + 1)), desc = 'interpolation sample time step', total = t + 1):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, i, self_cond)
 
