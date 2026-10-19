@@ -1,5 +1,6 @@
 import math
 import os
+from zipfile import BadZipFile
 
 import numpy as np
 import torch
@@ -60,11 +61,10 @@ class FIDEvaluation:
     def load_or_precalc_dataset_stats(self):
         path = os.path.join(self.stats_dir, "dataset_stats")
         try:
-            ckpt = np.load(path + ".npz")
-            self.m2, self.s2 = ckpt["m2"], ckpt["s2"]
+            with np.load(path + ".npz") as ckpt:
+                self.m2, self.s2 = ckpt["m2"], ckpt["s2"]
             self.print_fn("Dataset stats loaded from disk.")
-            ckpt.close()
-        except OSError:
+        except (OSError, EOFError, ValueError, KeyError, BadZipFile):
             num_batches = int(math.ceil(self.n_samples / self.batch_size))
             stacked_real_features = []
             self.print_fn(
