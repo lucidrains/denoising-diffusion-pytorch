@@ -74,7 +74,7 @@ class Attend(nn.Module):
         _, heads, q_len, _, k_len, is_cuda, device = *q.shape, k.shape[-2], q.is_cuda, q.device
 
         if exists(self.scale):
-            default_scale = q.shape[-1]
+            default_scale = q.shape[-1] ** -0.5
             q = q * (self.scale / default_scale)
 
         q, k, v = map(lambda t: t.contiguous(), (q, k, v))
