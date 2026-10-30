@@ -607,7 +607,8 @@ class GaussianDiffusion(nn.Module):
         elif self.pred_objective == 'eps':
             x_start = (x - sigma * pred) / alpha
 
-        x_start.clamp_(-1., 1.)
+        if self.clip_sample_denoised:
+            x_start.clamp_(-1., 1.)
 
         model_mean = alpha_next * (x * (1 - c) / alpha + c * x_start)
 
