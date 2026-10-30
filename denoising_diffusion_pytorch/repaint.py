@@ -666,7 +666,7 @@ class GaussianDiffusion(Module):
 
         if mask is not None:
             mask = mask.to(x.device)
-            gt = normalize_to_neg_one_to_one(gt)
+            gt = self.normalize(gt)
             alpha_cumnprod_t = self.alphas_cumprod[t]
             gt_weight = torch.sqrt(alpha_cumnprod_t).to(x.device)
             gt_part = gt_weight * gt
