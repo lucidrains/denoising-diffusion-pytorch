@@ -716,12 +716,14 @@ class GaussianDiffusion(Module):
             # Resampling loop: line 9 of Algorithm 1 in https://arxiv.org/pdf/2201.09865
             if resample is True and (t > 0) and (t % resample_every == 0 or t == 1) and mask is not None:
                 # Jump back for resample_jump timesteps and resample_iter times
+                jump_end = min(t + resample_jump, self.num_timesteps)
                 for iter in tqdm(range(resample_iter), desc = 'resample loop', total = resample_iter):
-                    t = resample_jump
-                    beta = self.betas[t]
-                    img = torch.sqrt(1 - beta) * img + torch.sqrt(beta) * torch.randn_like(img)
-                    for j in reversed(range(0, resample_jump)):
-                        img, x_start = self.p_sample(x=img, t=t, gt=gt, mask=mask)
+                    for j in range(t, jump_end):
+                        beta = self.betas[j]
+                        img = torch.sqrt(1 - beta) * img + torch.sqrt(beta) * torch.randn_like(img)
+                    for j in reversed(range(t, jump_end)):
+                        self_cond = x_start if self.self_condition else None
+                        img, x_start = self.p_sample(x=img, t=j, x_self_cond=self_cond, gt=gt, mask=mask)
                 imgs.append(img)
 
         ret = img if not return_all_timesteps else torch.stack(imgs, dim = 1)
