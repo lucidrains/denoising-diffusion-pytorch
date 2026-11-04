@@ -718,7 +718,7 @@ class KarrasUnet3D(Module):
                 class_labels = F.one_hot(class_labels, self.num_classes)
 
             assert class_labels.shape[-1] == self.num_classes
-            class_labels = class_labels.float() * sqrt(self.num_classes)
+            class_labels = class_labels.to(time_emb.dtype) * sqrt(self.num_classes)
 
             class_emb = self.to_class_emb(class_labels)
 
