@@ -1,4 +1,3 @@
-import math
 import os
 
 import numpy as np
@@ -65,19 +64,22 @@ class FIDEvaluation:
             self.print_fn("Dataset stats loaded from disk.")
             ckpt.close()
         except OSError:
-            num_batches = int(math.ceil(self.n_samples / self.batch_size))
+            remaining_samples = self.n_samples
             stacked_real_features = []
             self.print_fn(
                 f"Stacking Inception features for {self.n_samples} samples from the real dataset."
             )
-            for _ in tqdm(range(num_batches)):
-                try:
-                    real_samples = next(self.dl)
-                except StopIteration:
-                    break
-                real_samples = real_samples.to(self.device)
-                real_features = self.calculate_inception_features(real_samples)
-                stacked_real_features.append(real_features)
+            with tqdm(total=self.n_samples) as progress:
+                while remaining_samples > 0:
+                    try:
+                        real_samples = next(self.dl)
+                    except StopIteration:
+                        break
+                    real_samples = real_samples[:remaining_samples].to(self.device)
+                    real_features = self.calculate_inception_features(real_samples)
+                    stacked_real_features.append(real_features)
+                    remaining_samples -= real_samples.shape[0]
+                    progress.update(real_samples.shape[0])
             stacked_real_features = (
                 torch.cat(stacked_real_features, dim=0).cpu().numpy()
             )
