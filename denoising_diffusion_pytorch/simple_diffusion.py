@@ -700,11 +700,14 @@ class GaussianDiffusion(nn.Module):
 
         return losses.mean()
 
-    def forward(self, img, *args, loss_reduction = 'mean', **kwargs):
+    def random_times(self, batch_size):
+        return torch.zeros((batch_size,), device = self.device).float().uniform_(0, 1)
+
+    def forward(self, img, *args, times = None, loss_reduction = 'mean', **kwargs):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
-        assert h == img_size and w == img_size, f'height and width of image must be {image_size}'
+        assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
 
         img = normalize_to_neg_one_to_one(img)
-        times = torch.zeros((img.shape[0],), device = self.device).float().uniform_(0, 1)
+        times = default(times, lambda: self.random_times(b))
 
         return self.p_losses(img, times, *args, loss_reduction = loss_reduction, **kwargs)
