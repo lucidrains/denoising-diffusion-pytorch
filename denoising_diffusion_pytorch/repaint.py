@@ -26,6 +26,8 @@ from ema_pytorch import EMA
 
 from accelerate import Accelerator
 
+from denoising_diffusion_pytorch.image_files import image_files
+
 from denoising_diffusion_pytorch.attend import Attend
 from denoising_diffusion_pytorch.fid_evaluation import FIDEvaluation
 
@@ -897,7 +899,7 @@ class Dataset(Dataset):
         super().__init__()
         self.folder = folder
         self.image_size = image_size
-        self.paths = [p for ext in exts for p in Path(f'{folder}').glob(f'**/*.{ext}')]
+        self.paths = image_files(folder, exts)
 
         maybe_convert_fn = partial(convert_image_to_fn, convert_image_to) if exists(convert_image_to) else nn.Identity()
 
@@ -914,8 +916,8 @@ class Dataset(Dataset):
 
     def __getitem__(self, index):
         path = self.paths[index]
-        img = Image.open(path)
-        return self.transform(img)
+        with Image.open(path) as img:
+            return self.transform(img)
 
 # trainer class
 
