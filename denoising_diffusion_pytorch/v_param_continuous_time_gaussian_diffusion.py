@@ -187,6 +187,6 @@ class VParamContinuousTimeGaussianDiffusion(nn.Module):
         b, c, h, w, device, img_size, = *img.shape, img.device, self.image_size
         assert h == img_size and w == img_size, f'height and width of image must be {img_size}'
 
-        times = default(times, self.random_times(b))
+        times = default(times, lambda: self.random_times(b))
         img = normalize_to_neg_one_to_one(img)
         return self.p_losses(img, times, *args, loss_reduction = loss_reduction, **kwargs)
