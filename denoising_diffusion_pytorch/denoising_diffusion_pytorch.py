@@ -1,4 +1,5 @@
 import math
+from contextlib import nullcontext
 import copy
 from pathlib import Path
 from random import random
@@ -1059,15 +1060,20 @@ class Trainer:
 
                 total_loss = 0.
 
-                for _ in range(self.gradient_accumulate_every):
+                for microstep in range(self.gradient_accumulate_every):
                     data = next(self.dl).to(device)
 
-                    with self.accelerator.autocast():
-                        loss = self.model(data)
-                        loss = loss / self.gradient_accumulate_every
-                        total_loss += loss.item()
+                    # DDP only needs to reduce the accumulated gradients on the last microbatch.
+                    accumulate_ddp = isinstance(self.model, nn.parallel.DistributedDataParallel) and microstep < self.gradient_accumulate_every - 1
+                    sync_context = self.accelerator.no_sync(self.model) if accumulate_ddp else nullcontext()
 
-                    self.accelerator.backward(loss)
+                    with sync_context:
+                        with self.accelerator.autocast():
+                            loss = self.model(data)
+                            loss = loss / self.gradient_accumulate_every
+                            total_loss += loss.item()
+
+                        self.accelerator.backward(loss)
 
                 pbar.set_description(f'loss: {total_loss:.4f}')
 
