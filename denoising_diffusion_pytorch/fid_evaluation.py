@@ -19,6 +19,40 @@ def num_to_groups(num, divisor):
     return arr
 
 
+class _FeatureStats:
+    """Merge batch moments without retaining the full feature population."""
+
+    def __init__(self):
+        self.count = 0
+        self.mean = None
+        self.m2 = None
+
+    def update(self, features):
+        features = features.detach().to(device="cpu", dtype=torch.float64).numpy()
+        count = features.shape[0]
+        if count == 0:
+            return
+
+        mean = features.mean(axis=0)
+        centered = features - mean
+        m2 = centered.T @ centered
+
+        if self.count == 0:
+            self.count, self.mean, self.m2 = count, mean, m2
+            return
+
+        total = self.count + count
+        delta = mean - self.mean
+        self.m2 += m2 + np.outer(delta, delta) * (self.count * count / total)
+        self.mean += delta * (count / total)
+        self.count = total
+
+    def finalize(self):
+        if self.count < 2:
+            raise ValueError("FID statistics require at least two feature samples")
+        return self.mean, self.m2 / (self.count - 1)
+
+
 class FIDEvaluation:
     def __init__(
         self,
@@ -66,9 +100,9 @@ class FIDEvaluation:
             ckpt.close()
         except OSError:
             num_batches = int(math.ceil(self.n_samples / self.batch_size))
-            stacked_real_features = []
+            stats = _FeatureStats()
             self.print_fn(
-                f"Stacking Inception features for {self.n_samples} samples from the real dataset."
+                f"Calculating Inception statistics for {self.n_samples} samples from the real dataset."
             )
             for _ in tqdm(range(num_batches)):
                 try:
@@ -76,13 +110,8 @@ class FIDEvaluation:
                 except StopIteration:
                     break
                 real_samples = real_samples.to(self.device)
-                real_features = self.calculate_inception_features(real_samples)
-                stacked_real_features.append(real_features)
-            stacked_real_features = (
-                torch.cat(stacked_real_features, dim=0).cpu().numpy()
-            )
-            m2 = np.mean(stacked_real_features, axis=0)
-            s2 = np.cov(stacked_real_features, rowvar=False)
+                stats.update(self.calculate_inception_features(real_samples))
+            m2, s2 = stats.finalize()
             np.savez_compressed(path, m2=m2, s2=s2)
             self.print_fn(f"Dataset stats cached to {path}.npz for future use.")
             self.m2, self.s2 = m2, s2
@@ -94,16 +123,13 @@ class FIDEvaluation:
             self.load_or_precalc_dataset_stats()
         self.sampler.eval()
         batches = num_to_groups(self.n_samples, self.batch_size)
-        stacked_fake_features = []
+        stats = _FeatureStats()
         self.print_fn(
-            f"Stacking Inception features for {self.n_samples} generated samples."
+            f"Calculating Inception statistics for {self.n_samples} generated samples."
         )
         for batch in tqdm(batches):
             fake_samples = self.sampler.sample(batch_size=batch)
-            fake_features = self.calculate_inception_features(fake_samples)
-            stacked_fake_features.append(fake_features)
-        stacked_fake_features = torch.cat(stacked_fake_features, dim=0).cpu().numpy()
-        m1 = np.mean(stacked_fake_features, axis=0)
-        s1 = np.cov(stacked_fake_features, rowvar=False)
+            stats.update(self.calculate_inception_features(fake_samples))
+        m1, s1 = stats.finalize()
 
         return calculate_frechet_distance(m1, s1, self.m2, self.s2)
