@@ -33,10 +33,16 @@ def log(t, eps = 1e-15):
 def meanflat(x):
     return x.mean(dim = tuple(range(1, len(x.shape))))
 
+def _float_for_loss(x):
+    if isinstance(x, torch.Tensor) and x.dtype in (torch.float16, torch.bfloat16):
+        return x.float()
+    return x
+
 def normal_kl(mean1, logvar1, mean2, logvar2):
     """
     KL divergence between normal distributions parameterized by mean and log-variance.
     """
+    mean1, logvar1, mean2, logvar2 = map(_float_for_loss, (mean1, logvar1, mean2, logvar2))
     return 0.5 * (-1.0 + logvar2 - logvar1 + torch.exp(logvar1 - logvar2) + ((mean1 - mean2) ** 2) * torch.exp(-logvar2))
 
 def approx_standard_normal_cdf(x):
@@ -44,6 +50,7 @@ def approx_standard_normal_cdf(x):
 
 def discretized_gaussian_log_likelihood(x, *, means, log_scales, thres = 0.999):
     assert x.shape == means.shape == log_scales.shape
+    x, means, log_scales = map(_float_for_loss, (x, means, log_scales))
 
     centered_x = x - means
     inv_stdv = torch.exp(-log_scales)
