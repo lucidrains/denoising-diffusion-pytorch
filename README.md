@@ -87,6 +87,34 @@ trainer.train()
 
 Samples and model checkpoints will be logged to `./results` periodically
 
+### Karras U-Net with continuous noise
+
+The magnitude-preserving `KarrasUnet` uses random Fourier time embeddings and can be trained with `ElucidatedDiffusion`. The model and diffusion wrapper must use matching image sizes and channel counts.
+
+```python
+import torch
+from denoising_diffusion_pytorch import KarrasUnet, ElucidatedDiffusion
+
+model = KarrasUnet(
+    image_size = 32,
+    channels = 3,
+    dim = 32,
+    num_downsamples = 1,
+    num_blocks_per_stage = 1,
+    attn_dim_head = 16
+)
+
+diffusion = ElucidatedDiffusion(
+    model,
+    image_size = 32,
+    channels = 3,
+    num_sample_steps = 8
+)
+
+loss = diffusion(torch.rand(2, 3, 32, 32))
+loss.backward()
+```
+
 ## Explorative Modeling (Forward XM)
 
 To use <a href="https://arxiv.org/abs/2607.27372">Explorative Modeling (Forward XM)</a> for multi-candidate loss calculation during training, wrap any diffusion model in `XMWrapper`.

@@ -436,6 +436,7 @@ class KarrasUnet(Module):
         super().__init__()
 
         self.self_condition = self_condition
+        self.random_or_learned_sinusoidal_cond = True
 
         # determine dimensions
 
