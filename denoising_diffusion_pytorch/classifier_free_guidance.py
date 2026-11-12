@@ -768,6 +768,8 @@ class GaussianDiffusion(nn.Module):
 
         assert x1.shape == x2.shape
 
+        x1, x2 = tuple(normalize_to_neg_one_to_one(x) for x in (x1, x2))
+
         t_batched = torch.stack([torch.tensor(t, device = device)] * b)
         xt1, xt2 = map(lambda x: self.q_sample(x, t = t_batched), (x1, x2))
 
@@ -776,7 +778,7 @@ class GaussianDiffusion(nn.Module):
         for i in tqdm(reversed(range(0, t)), desc = 'interpolation sample time step', total = t):
             img, _ = self.p_sample(img, i, classes)
 
-        return img
+        return unnormalize_to_zero_to_one(img)
 
     @autocast('cuda', enabled = False)
     def q_sample(self, x_start, t, noise=None):

@@ -676,6 +676,8 @@ class GaussianDiffusion1D(Module):
 
         assert x1.shape == x2.shape
 
+        x1, x2 = tuple(self.normalize(x) for x in (x1, x2))
+
         t_batched = torch.full((b,), t, device = device)
         xt1, xt2 = map(lambda x: self.q_sample(x, t = t_batched), (x1, x2))
 
@@ -687,7 +689,7 @@ class GaussianDiffusion1D(Module):
             self_cond = x_start if self.self_condition else None
             img, x_start = self.p_sample(img, i, self_cond)
 
-        return img
+        return self.unnormalize(img)
 
     @autocast('cuda', enabled = False)
     def q_sample(self, x_start, t, noise=None):
