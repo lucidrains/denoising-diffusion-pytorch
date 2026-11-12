@@ -565,7 +565,7 @@ class KarrasUnet3D(Module):
 
         # number of blocks per downsample
 
-        num_blocks_per_stage = cast_tuple(num_blocks_per_stage, num_downsamples)
+        num_blocks_per_stage = cast_tuple(num_blocks_per_stage, num_downsamples + 1)
 
         if len(num_blocks_per_stage) == num_downsamples:
             first, *_ = num_blocks_per_stage
