@@ -1058,6 +1058,9 @@ class Trainer:
             'version': __version__
         }
 
+        if self.save_best_and_latest_only:
+            data['best_fid'] = self.best_fid
+
         torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
 
     def load(self, milestone):
@@ -1070,6 +1073,8 @@ class Trainer:
         model.load_state_dict(data['model'])
 
         self.step = data['step']
+        if self.save_best_and_latest_only:
+            self.best_fid = data.get('best_fid', self.best_fid)
         self.opt.load_state_dict(data['opt'])
         if self.accelerator.is_main_process:
             self.ema.load_state_dict(data["ema"])
