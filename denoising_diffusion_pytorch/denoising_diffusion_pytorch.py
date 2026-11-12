@@ -796,7 +796,7 @@ class GaussianDiffusion(Module):
 
         if offset_noise_strength > 0.:
             offset_noise = torch.randn(x_start.shape[:2], device = self.device)
-            noise += offset_noise_strength * rearrange(offset_noise, 'b c -> b c 1 1')
+            noise = (noise + offset_noise_strength * rearrange(offset_noise, 'b c -> b c 1 1')).to(noise.dtype)
 
         # noise sample
 
