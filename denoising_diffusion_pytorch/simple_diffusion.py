@@ -330,7 +330,7 @@ class UViT(nn.Module):
         # for initial dwt transform (or whatever transform researcher wants to try here)
 
         if exists(init_img_transform) and exists(final_img_itransform):
-            init_shape = torch.Size(1, 1, 32, 32)
+            init_shape = torch.Size((1, channels, 32, 32))
             mock_tensor = torch.randn(init_shape)
             assert final_img_itransform(init_img_transform(mock_tensor)).shape == init_shape
 
