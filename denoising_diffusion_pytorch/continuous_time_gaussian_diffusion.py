@@ -102,8 +102,8 @@ class learned_noise_schedule(nn.Module):
         frac_gradient = self.frac_gradient
         device = x.device
 
-        out_zero = self.net(torch.zeros_like(x))
-        out_one =  self.net(torch.ones_like(x))
+        out_zero = self.net(x.new_zeros(()))
+        out_one = self.net(x.new_ones(()))
 
         x = self.net(x)
 
