@@ -766,6 +766,7 @@ class GaussianDiffusion(Module):
 
         return img
 
+    @torch.no_grad()
     def noise_assignment(self, x_start, noise):
         x_start, noise = tuple(rearrange(t, 'b ... -> b (...)') for t in (x_start, noise))
         dist = torch.cdist(x_start, noise)
