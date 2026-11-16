@@ -388,7 +388,8 @@ class Unet(nn.Module):
         if cond_scale == 1:
             return logits
 
-        null_logits = self.forward(*args, cond_drop_prob = 1., **kwargs)
+        null_kwargs = {key: value for key, value in kwargs.items() if key != 'cond_keep_mask'}
+        null_logits = self.forward(*args, cond_drop_prob = 1., **null_kwargs)
         update = logits - null_logits
 
         if remove_parallel_component:
