@@ -566,13 +566,20 @@ class KarrasUnet1D(Module):
         x,
         time,
         self_cond = None,
-        class_labels = None
+        class_labels = None,
+        *,
+        x_self_cond = None
     ):
         # validate image shape
 
         assert x.shape[1:] == (self.channels, self.seq_len)
 
         # self conditioning
+
+        if exists(self_cond) and exists(x_self_cond):
+            raise ValueError('pass either self_cond or x_self_cond, not both')
+
+        self_cond = default(self_cond, x_self_cond)
 
         if self.self_condition:
             self_cond = default(self_cond, lambda: torch.zeros_like(x))
