@@ -849,6 +849,9 @@ class Trainer(object):
 
         # dataset and dataloader
 
+        if not exists(convert_image_to):
+            convert_image_to = {1: 'L', 3: 'RGB', 4: 'RGBA'}.get(diffusion_model.channels)
+
         self.ds = Dataset(folder, self.image_size, augment_horizontal_flip = augment_horizontal_flip, convert_image_to = convert_image_to)
         dl = DataLoader(self.ds, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
 
