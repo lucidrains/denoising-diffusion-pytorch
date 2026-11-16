@@ -604,7 +604,7 @@ class GaussianDiffusion1D(Module):
     def p_sample_loop(self, shape, return_noise = False, model_forward_kwargs: dict = dict()):
         batch, device = shape[0], self.betas.device
 
-        noise = torch.randn(shape, device=device)
+        noise = torch.randn(shape, device=device, dtype = self.betas.dtype)
         img = noise
 
         x_start = None
@@ -628,7 +628,7 @@ class GaussianDiffusion1D(Module):
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
-        noise = torch.randn(shape, device = device)
+        noise = torch.randn(shape, device = device, dtype = self.betas.dtype)
         img = noise
 
         x_start = None
