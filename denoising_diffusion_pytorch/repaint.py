@@ -757,7 +757,7 @@ class GaussianDiffusion(Module):
             sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
             c = (1 - alpha_next - sigma ** 2).sqrt()
 
-            noise = torch.randn_like(img)
+            noise = torch.randn_like(img) if eta != 0 else 0.
 
             img = x_start * alpha_next.sqrt() + \
                   c * pred_noise + \
