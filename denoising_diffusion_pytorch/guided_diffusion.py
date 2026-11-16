@@ -627,7 +627,7 @@ class GaussianDiffusion(nn.Module):
     def p_sample_loop(self, shape, return_all_timesteps = False, cond_fn=None, guidance_kwargs=None):
         batch, device = shape[0], self.betas.device
 
-        img = torch.randn(shape, device = device)
+        img = torch.randn(shape, device = device, dtype = self.betas.dtype)
         imgs = [img]
 
         x_start = None
@@ -650,7 +650,7 @@ class GaussianDiffusion(nn.Module):
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:])) # [(T-1, T-2), (T-2, T-3), ..., (1, 0), (0, -1)]
 
-        img = torch.randn(shape, device = device)
+        img = torch.randn(shape, device = device, dtype = self.betas.dtype)
         imgs = [img]
 
         x_start = None
