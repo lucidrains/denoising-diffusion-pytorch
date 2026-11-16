@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "accelerate",
+    "accelerate>=0.28.0",
     "einops",
     "ema-pytorch>=0.4.2",
     "numpy",

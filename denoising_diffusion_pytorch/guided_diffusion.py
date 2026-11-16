@@ -22,7 +22,7 @@ from PIL import Image
 from tqdm.auto import tqdm
 from ema_pytorch import EMA
 
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 
 # from denoising_diffusion_pytorch.version import __version__
 
@@ -829,7 +829,7 @@ class Trainer(object):
         super().__init__()
 
         self.accelerator = Accelerator(
-            split_batches = split_batches,
+            dataloader_config = DataLoaderConfiguration(split_batches = split_batches),
             mixed_precision = 'fp16' if fp16 else 'no'
         )
 
