@@ -3,7 +3,7 @@ from inspect import signature
 import torch
 from torch.nn import Module
 from torch import cat, is_tensor
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 from einops import repeat, reduce, rearrange
 
 # explorative modeling (forward xm)
@@ -93,10 +93,12 @@ class XMWrapper(Module):
 
         # repeat inputs K candidates times
 
-        args_K, kwargs_K = tree_map(
-            lambda t: repeat(t, 'b ... -> (b k) ...', k = candidates) if is_batch_tensor(t, batch) else t,
-            (args, kwargs)
-        )
+        leaves, input_spec = tree_flatten((args, kwargs))
+        batched = [is_batch_tensor(t, batch) for t in leaves]
+        expanded = [
+            repeat(t, 'b ... -> (b k) ...', k = candidates) if is_batched else t
+            for t, is_batched in zip(leaves, batched)
+        ]
 
         total = batch * candidates
         chunk_size = default(max_batch_size, total) if self.has_loss_reduction else 1
@@ -109,9 +111,9 @@ class XMWrapper(Module):
         for start in range(0, total, chunk_size):
             end = min(start + chunk_size, total)
 
-            chunk_args, chunk_kwargs = tree_map(
-                lambda t: t[start:end] if is_batch_tensor(t, total) else t,
-                (args_K, kwargs_K)
+            chunk_args, chunk_kwargs = tree_unflatten(
+                [t[start:end] if is_batched else t for t, is_batched in zip(expanded, batched)],
+                input_spec
             )
             chunk_kwargs.update(extra_kwargs)
 
