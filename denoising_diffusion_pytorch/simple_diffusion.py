@@ -681,17 +681,19 @@ class GaussianDiffusion(nn.Module):
 
         loss = reduce(loss, 'b ... -> b', 'mean')
 
-        snr = log_snr.exp()
+        if log_snr.dtype in (torch.float16, torch.bfloat16):
+            log_snr = log_snr.float()
 
-        maybe_clip_snr = snr.clone()
+        clipped_log_snr = log_snr
         if self.min_snr_loss_weight:
-            maybe_clip_snr.clamp_(max = self.min_snr_gamma)
+            log_gamma = log_snr.new_tensor(self.min_snr_gamma).log()
+            clipped_log_snr = log_snr.clamp(max = log_gamma)
 
         if self.pred_objective == 'v':
-            loss_weight = maybe_clip_snr / (snr + 1)
+            loss_weight = (clipped_log_snr - F.softplus(log_snr)).exp()
 
         elif self.pred_objective == 'eps':
-            loss_weight = maybe_clip_snr / snr
+            loss_weight = (clipped_log_snr - log_snr).exp()
 
         losses = loss * loss_weight
 
