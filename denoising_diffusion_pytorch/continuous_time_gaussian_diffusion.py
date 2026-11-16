@@ -260,8 +260,11 @@ class ContinuousTimeGaussianDiffusion(nn.Module):
         losses = reduce(losses, 'b ... -> b', 'mean')
 
         if self.min_snr_loss_weight:
-            snr = log_snr.exp()
-            loss_weight = snr.clamp(max = self.min_snr_gamma) / snr
+            if log_snr.dtype in (torch.float16, torch.bfloat16):
+                log_snr = log_snr.float()
+            log_gamma = log_snr.new_tensor(self.min_snr_gamma).log()
+            clipped_log_snr = log_snr.clamp(max = log_gamma)
+            loss_weight = (clipped_log_snr - log_snr).exp()
             losses = losses * loss_weight
 
         if loss_reduction == 'none':
