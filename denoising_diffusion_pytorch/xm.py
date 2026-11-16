@@ -83,10 +83,10 @@ class XMWrapper(Module):
             random_kwargs = self.flow_model.xm_shared_random_kwargs(batch)
 
             for key, value in random_kwargs.items():
-                if key not in kwargs:
+                if not exists(kwargs.get(key)):
                     kwargs[key] = value
 
-        if self.random_time_kwarg not in kwargs:
+        if not exists(kwargs.get(self.random_time_kwarg)):
             assert hasattr(self.flow_model, self.random_time_method), f'flow_model must have a {self.random_time_method} method'
             fn = getattr(self.flow_model, self.random_time_method)
             kwargs[self.random_time_kwarg] = fn(batch)
