@@ -95,7 +95,8 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         normalize_dim = self.normalize_dim
         scale = append_dims(self.g, x.ndim - self.normalize_dim - 1) if self.scale else 1
-        return F.normalize(x, dim = normalize_dim) * scale * (x.shape[normalize_dim] ** 0.5)
+        norm_input = x.float() if x.dtype == torch.float16 else x
+        return F.normalize(norm_input, dim = normalize_dim).to(x.dtype) * scale * (x.shape[normalize_dim] ** 0.5)
 
 # sinusoidal positional embeds
 

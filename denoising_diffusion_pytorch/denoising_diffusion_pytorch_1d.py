@@ -107,7 +107,8 @@ class RMSNorm(Module):
         self.g = nn.Parameter(torch.ones(1, dim, 1))
 
     def forward(self, x):
-        return F.normalize(x, dim = 1) * self.g * (x.shape[1] ** 0.5)
+        norm_input = x.float() if x.dtype == torch.float16 else x
+        return F.normalize(norm_input, dim = 1).to(x.dtype) * self.g * (x.shape[1] ** 0.5)
 
 class PreNorm(Module):
     def __init__(self, dim, fn):
