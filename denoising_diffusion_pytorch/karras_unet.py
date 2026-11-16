@@ -583,7 +583,7 @@ class KarrasUnet(Module):
 
         if self.needs_class_labels:
             if class_labels.dtype in (torch.int, torch.long):
-                class_labels = F.one_hot(class_labels, self.num_classes)
+                class_labels = F.one_hot(class_labels.long(), self.num_classes)
 
             assert class_labels.shape[-1] == self.num_classes
             class_labels = class_labels.float() * sqrt(self.num_classes)
