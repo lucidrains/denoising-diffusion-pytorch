@@ -601,7 +601,7 @@ class GaussianDiffusion(nn.Module):
         # this fixes a bug in the official OpenAI implementation:
         # https://github.com/openai/guided-diffusion/issues/51 (see point 1)
         # use the predicted mean for the previous timestep to compute gradient
-        gradient = cond_fn(mean, t, **guidance_kwargs)
+        gradient = cond_fn(mean, t, **default(guidance_kwargs, {}))
         new_mean = (
             mean.float() + variance * gradient.float()
         )
@@ -616,7 +616,7 @@ class GaussianDiffusion(nn.Module):
         model_mean, variance, model_log_variance, x_start = self.p_mean_variance(
             x = x, t = batched_times, x_self_cond = x_self_cond, clip_denoised = True
         )
-        if exists(cond_fn) and exists(guidance_kwargs):
+        if exists(cond_fn):
             model_mean = self.condition_mean(cond_fn, model_mean, variance, x, batched_times, guidance_kwargs)
 
         noise = torch.randn_like(x) if t > 0 else 0. # no noise if t == 0
