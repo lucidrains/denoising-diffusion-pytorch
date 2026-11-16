@@ -155,7 +155,7 @@ class ElucidatedDiffusion(nn.Module):
             0.
         )
 
-        sigmas_and_gammas = list(zip(sigmas[:-1], sigmas[1:], gammas[:-1]))
+        sigmas_and_gammas = torch.stack((sigmas[:-1], sigmas[1:], gammas[:-1]), dim = -1).tolist()
 
         # images is noise at the beginning
 
@@ -170,8 +170,6 @@ class ElucidatedDiffusion(nn.Module):
         # gradually denoise
 
         for sigma, sigma_next, gamma in tqdm(sigmas_and_gammas, desc = 'sampling time step'):
-            sigma, sigma_next, gamma = map(lambda t: t.item(), (sigma, sigma_next, gamma))
-
             eps = self.S_noise * torch.randn(shape, device = self.device) # stochastic sampling
 
             sigma_hat = sigma + gamma * sigma
