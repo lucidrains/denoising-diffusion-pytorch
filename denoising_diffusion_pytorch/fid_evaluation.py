@@ -46,11 +46,13 @@ class FIDEvaluation:
         self.dataset_stats_loaded = False
 
     def calculate_inception_features(self, samples):
+        samples = samples.to(dtype=next(self.inception_v3.parameters()).dtype)
         if self.channels == 1:
             samples = repeat(samples, "b 1 ... -> b c ...", c=3)
 
         self.inception_v3.eval()
-        features = self.inception_v3(samples)[0]
+        with torch.autocast(device_type=samples.device.type, enabled=False):
+            features = self.inception_v3(samples)[0]
 
         if features.size(2) != 1 or features.size(3) != 1:
             features = adaptive_avg_pool2d(features, output_size=(1, 1))
