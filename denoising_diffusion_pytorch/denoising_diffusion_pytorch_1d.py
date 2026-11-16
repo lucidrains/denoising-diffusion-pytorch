@@ -321,7 +321,7 @@ class Unet1D(Module):
             self.downs.append(ModuleList([
                 resnet_block(dim_in, dim_in),
                 resnet_block(dim_in, dim_in),
-                Residual(PreNorm(dim_in, LinearAttention(dim_in))),
+                Residual(PreNorm(dim_in, LinearAttention(dim_in, dim_head = attn_dim_head, heads = attn_heads))),
                 Downsample(dim_in, dim_out) if not is_last else nn.Conv1d(dim_in, dim_out, 3, padding = 1)
             ]))
 
@@ -336,7 +336,7 @@ class Unet1D(Module):
             self.ups.append(ModuleList([
                 resnet_block(dim_out + dim_in, dim_out),
                 resnet_block(dim_out + dim_in, dim_out),
-                Residual(PreNorm(dim_out, LinearAttention(dim_out))),
+                Residual(PreNorm(dim_out, LinearAttention(dim_out, dim_head = attn_dim_head, heads = attn_heads))),
                 Upsample(dim_out, dim_in) if not is_last else  nn.Conv1d(dim_out, dim_in, 3, padding = 1)
             ]))
 
