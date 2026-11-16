@@ -326,7 +326,7 @@ class Unet(Module):
 
         # attention
 
-        if not full_attn:
+        if full_attn is None:
             full_attn = (*((False,) * (len(dim_mults) - 1)), True)
 
         num_stages = len(dim_mults)
