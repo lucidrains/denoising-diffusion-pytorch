@@ -917,6 +917,8 @@ class Trainer(object):
 
             while self.step < self.train_num_steps:
 
+                self.model.train()
+
                 total_loss = 0.
 
                 for _ in range(self.gradient_accumulate_every):
