@@ -16,7 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 from einops import rearrange, reduce
 from einops.layers.torch import Rearrange
 
-from accelerate import Accelerator
+from accelerate import Accelerator, DataLoaderConfiguration
 from ema_pytorch import EMA
 
 from tqdm.auto import tqdm
@@ -793,7 +793,7 @@ class Trainer1D(object):
         # accelerator
 
         self.accelerator = Accelerator(
-            split_batches = split_batches,
+            dataloader_config = DataLoaderConfiguration(split_batches = split_batches),
             mixed_precision = mixed_precision_type if amp else 'no'
         )
 
