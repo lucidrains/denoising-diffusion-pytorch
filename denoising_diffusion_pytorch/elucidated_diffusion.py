@@ -1,4 +1,4 @@
-from math import sqrt
+from math import hypot, sqrt
 from random import random
 import torch
 from torch import nn, einsum
@@ -86,14 +86,21 @@ class ElucidatedDiffusion(nn.Module):
 
     # derived preconditioning params - Table 1
 
+    def _sigma_norm(self, sigma):
+        if not torch.is_tensor(sigma):
+            return hypot(sigma, self.sigma_data)
+        if sigma.dtype in (torch.float16, torch.bfloat16):
+            sigma = sigma.float()
+        return torch.hypot(sigma, sigma.new_tensor(self.sigma_data))
+
     def c_skip(self, sigma):
-        return (self.sigma_data ** 2) / (sigma ** 2 + self.sigma_data ** 2)
+        return (self.sigma_data / self._sigma_norm(sigma)) ** 2
 
     def c_out(self, sigma):
-        return sigma * self.sigma_data * (self.sigma_data ** 2 + sigma ** 2) ** -0.5
+        return (sigma / self._sigma_norm(sigma)) * self.sigma_data
 
     def c_in(self, sigma):
-        return 1 * (sigma ** 2 + self.sigma_data ** 2) ** -0.5
+        return 1 / self._sigma_norm(sigma)
 
     def c_noise(self, sigma):
         return log(sigma) * 0.25
@@ -239,7 +246,9 @@ class ElucidatedDiffusion(nn.Module):
     # training
 
     def loss_weight(self, sigma):
-        return (sigma ** 2 + self.sigma_data ** 2) * (sigma * self.sigma_data) ** -2
+        if torch.is_tensor(sigma) and sigma.dtype in (torch.float16, torch.bfloat16):
+            sigma = sigma.float()
+        return (1 / self.sigma_data) ** 2 + (1 / sigma) ** 2
 
     def noise_distribution(self, batch_size):
         return (self.P_mean + self.P_std * torch.randn((batch_size,), device = self.device)).exp()
