@@ -29,6 +29,7 @@ from ema_pytorch import EMA
 from accelerate import Accelerator
 
 from denoising_diffusion_pytorch.attend import Attend
+from denoising_diffusion_pytorch._checkpoint import atomic_torch_save
 
 from denoising_diffusion_pytorch.version import __version__
 
@@ -1026,7 +1027,7 @@ class Trainer:
             'version': __version__
         }
 
-        torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
+        atomic_torch_save(data, self.results_folder / f'model-{milestone}.pt')
 
     def load(self, milestone):
         accelerator = self.accelerator
